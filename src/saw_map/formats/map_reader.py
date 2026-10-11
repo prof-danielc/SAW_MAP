@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 from saw_map.diagnostics.logger import get_logger
+from saw_map.formats.record_layout import TABLE_WINDOW
+from saw_map.formats.records_reader import RecordsReader
+from saw_map.maps.entities import extract_entities
 from saw_map.maps.model import (
     SUPPORTED_MAP_VERSIONS,
     CellComponent,
@@ -19,6 +22,7 @@ from saw_map.maps.model import (
     MapCell,
     MapDocument,
 )
+from saw_map.maps.records import EntityCategory, PostTileData
 
 logger = get_logger("formats.map_reader")
 
@@ -28,6 +32,8 @@ EXPECTED_LAYERS = 7
 GRID_MAX_WIDTH = 130
 GRID_MAX_HEIGHT = 100
 CELL_BYTE_SIZE = 13
+# Leading lines of the companion .txt file: one popup message per information token id
+TOKEN_MESSAGE_LINES = 40
 CELLS_PER_LAYER = GRID_MAX_WIDTH * GRID_MAX_HEIGHT
 PRESENCE_BIT = 0x8000
 GROUP_MASK = 0x7F
@@ -143,11 +149,20 @@ class MapReader:
 
         raw_cells = list(struct.iter_unpack("<HHHHBI", data[tile_start : tile_start + required_bytes]))
 
-        # Discover the playable window (companion .txt dimensions and stored content)
-        mission_lines = cls._read_mission_lines(path)
-        origin_x, origin_y, width, height = cls._discover_active_window(
-            raw_cells, mission_lines, override_width, override_height
-        )
+        # Decode the record tables that follow the tile array
+        post_tile = RecordsReader.read(data, tile_start + required_bytes, version_str)
+        if not post_tile.is_decoded:
+            logger.warning(f"Post-tile records not decoded: {post_tile.status_detail}")
+
+        # Discover the playable window (stored bounds, else companion .txt, else content)
+        mission_file = cls._read_mission_file(path)
+        mission_lines = [line for line in mission_file if line]
+        window = None
+        if override_width is None or override_height is None:
+            window = cls._stored_window(post_tile)
+        if window is None:
+            window = cls._discover_active_window(raw_cells, mission_lines, override_width, override_height)
+        origin_x, origin_y, width, height = window
         logger.info(
             f"Loaded map '{path.stem}' (tileset '{title}'): active window {width}x{height} "
             f"at ({origin_x}, {origin_y}) (max 130x100x7)"
@@ -175,7 +190,7 @@ class MapReader:
         # The header string names the companion tileset (Sets/<title>.set)
         tileset_names = [title]
 
-        return MapDocument(
+        map_doc = MapDocument(
             title=title,
             version=version_str,
             width=width,
@@ -184,14 +199,47 @@ class MapReader:
             tileset_names=tileset_names,
             cells=cells,
             name=path.stem,
-            mission_text=cls._extract_mission_text(mission_lines),
+            mission_text=cls._extract_mission_text(mission_file),
+            token_messages=mission_file[:TOKEN_MESSAGE_LINES] if len(mission_file) > TOKEN_MESSAGE_LINES else [],
             origin_x=origin_x,
             origin_y=origin_y,
+            post_tile=post_tile,
         )
+        map_doc.set_entities(extract_entities(map_doc))
+        if post_tile.is_decoded:
+            placed = [e for e in map_doc.entities if e.category != EntityCategory.MARKER]
+            logger.info(
+                f"Post-tile records decoded: {len(post_tile.tables)} tables, {len(placed)} placed entities"
+            )
+        return map_doc
 
     @staticmethod
-    def _read_mission_lines(map_path: Path) -> List[str]:
+    def _stored_window(post_tile: PostTileData) -> Optional[Tuple[int, int, int, int]]:
+        """Reads the playable window (origin_x, origin_y, width, height) stored in the map stream."""
+        table = post_tile.get_table(TABLE_WINDOW) if post_tile.is_decoded else None
+        if table is None:
+            return None
+        values = table.records[0].values
+        min_x, min_y = values["min_x"], values["min_y"]
+        width, height = values["max_x"] - min_x, values["max_y"] - min_y
+        if (
+            min_x < 0
+            or min_y < 0
+            or not 20 <= width <= GRID_MAX_WIDTH - min_x
+            or not 20 <= height <= GRID_MAX_HEIGHT - min_y
+        ):
+            logger.warning(f"Stored playable window is implausible ({values}); falling back to mission file")
+            return None
+        return (min_x, min_y, width, height)
+
+    @classmethod
+    def _read_mission_lines(cls, map_path: Path) -> List[str]:
         """Reads the non-empty lines of the companion mission .txt file, if present."""
+        return [line for line in cls._read_mission_file(map_path) if line]
+
+    @staticmethod
+    def _read_mission_file(map_path: Path) -> List[str]:
+        """Reads all lines (stripped, empty ones kept) of the companion mission .txt file, if present."""
         companion_txt = map_path.with_suffix(".txt")
         if not companion_txt.is_file():
             # Check case-insensitive
@@ -207,13 +255,23 @@ class MapReader:
         except OSError as exc:
             logger.warning(f"Could not read companion mission file {companion_txt.name}: {exc}")
             return []
-        return [line.strip() for line in text.splitlines() if line.strip()]
+        return [line.strip() for line in text.splitlines()]
 
     @staticmethod
-    def _extract_mission_text(mission_lines: List[str]) -> str:
-        """Returns the briefing text preceding the '<index> : <status>' objective lines."""
+    def _extract_mission_text(mission_file: List[str]) -> str:
+        """Returns the mission briefing of the companion file.
+
+        A standard file holds 40 information token message lines followed by the
+        briefing on line 41. Shorter files are scanned for the text preceding the
+        '<index> : <status>' objective lines instead.
+        """
+        if len(mission_file) > TOKEN_MESSAGE_LINES:
+            briefing_lines = [line for line in mission_file[TOKEN_MESSAGE_LINES : TOKEN_MESSAGE_LINES + 2] if line]
+            if briefing_lines:
+                return "\n".join(briefing_lines)
+
         briefing: List[str] = []
-        for line in mission_lines:
+        for line in (text for text in mission_file if text):
             head, sep, tail = line.partition(":")
             if sep and head.strip().isdigit() and tail.strip().isdigit():
                 break

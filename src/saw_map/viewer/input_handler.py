@@ -33,6 +33,8 @@ class InputAction(str, Enum):
     TOGGLE_LEFT_WALLS = "TOGGLE_LEFT_WALLS"
     TOGGLE_RIGHT_WALLS = "TOGGLE_RIGHT_WALLS"
     TOGGLE_CLUTTER = "TOGGLE_CLUTTER"
+    TOGGLE_ENTITIES = "TOGGLE_ENTITIES"
+    TOGGLE_MARKERS = "TOGGLE_MARKERS"
     CYCLE_PALETTE = "CYCLE_PALETTE"
     TOGGLE_FULLSCREEN = "TOGGLE_FULLSCREEN"
     EXIT = "EXIT"
@@ -157,6 +159,14 @@ class InputHandler:
 
         elif action == InputAction.TOGGLE_CLUTTER:
             cam.show_clutter = not cam.show_clutter
+            self._redraw()
+
+        elif action == InputAction.TOGGLE_ENTITIES:
+            cam.show_entities = not cam.show_entities
+            self._redraw()
+
+        elif action == InputAction.TOGGLE_MARKERS:
+            cam.show_markers = not cam.show_markers
             self._redraw()
 
         elif action == InputAction.CYCLE_PALETTE:

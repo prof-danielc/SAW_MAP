@@ -3,7 +3,7 @@
 **Document File**: `REVERSE_ENGINEERING_INFO.md`  
 **Repository**: Soldiers at War Map Visualizer  
 **Status**: Living Document — Continuously Maintained  
-**Last Updated**: 2026-10-11 (193-byte header correction)  
+**Last Updated**: 2026-10-11 (193-byte header correction; post-tile record tables; information tokens)  
 
 ---
 
@@ -125,7 +125,7 @@ for ( i = 0; i < 7; ++i ) {             // 7 Elevation Layers (Z)
 | `+2` | `+2` | `uint16` (LE) | `word_559632` | `word1`: Left Wall component |
 | `+4` | `+4` | `uint16` (LE) | `word_559634` | `word2`: Right Wall component |
 | `+6` | `+6` | `uint16` (LE) | `word_559636` | `word3`: Clutter / object component |
-| `+8` | `+8` | `uint8` | `*(cell + 8)` | `byte4`: Unknown attribute. Only `0xFF` and `0x00` occur in `Airfield.map` (hypothesis: visibility / fog-of-war state) |
+| `+8` | `+8` | `uint8` | `byte_559638` | `byte4`: Black-out mask. The Scenario Builder's "Black Out" mode clears bits of this byte (§3.7). Only `0xFF` (visible) and `0x00` (blacked out) occur in the 96 shipped maps |
 | — | `+9 .. +11` | `uint8[3]` | — | 3-byte internal runtime padding (aligns flags to 4 bytes) |
 | `+9` | `+12` | `uint32` (LE) | `dword_55963C` | `dword5`: Flags. Bits 18–20 hold the floor cover level (§3.7); `0x001F0000` is the default value |
 
@@ -302,8 +302,40 @@ reading of the stored value is inferred.
 
 Walls (`word1`, `word2`) and clutter (`word3`) are not subject to this test.
 
-Other flag bits seen in `sub_4508F9` and still unexplained: bit 1 and bit 5 (extra draw calls
-after the floor), bit 8 (walls and clutter drawn through `sub_4447D5` instead of `sub_451610`).
+#### Cell Flag Bit Map (`dword5`)
+
+The remaining draw-related bits are read by `sub_43505D`, `sub_434FB0`, and `sub_4508F9`. Each
+marker is drawn only when the matching bit of the editor view mask `word_555FE0` is set, so most
+of them are editor aids. `0x001F0000` (bits 16–20 set) is the value of a plain cell.
+
+The "Editor mode" column gives the Scenario Builder mode that sets the bit, read from the
+placement handler (lines 39380–39800) and the mode-name switch (lines 79854–79917).
+
+| Bits | Meaning | Engine draw | Status |
+|---|---|---|---|
+| 0 | **Mission Exit** cell (editor mode 12) | `Token.obj` frame 6 (blue diamond outline) | Confirmed (mode 12 sets `|= 1`; cells line the map edge in `airfield_information_token.png`) |
+| 1 | Unknown | Extra call `sub_43CCF8` after the floor | Unknown |
+| 4 | **Item / Canister** present (editor modes 9 and 18) | `Can.obj` frame = bits 12–17; the Canister dialog offers "American / German / Generic Dead Body" or "Canister" as the appearance | Confirmed (901 cells in 95 maps, every frame valid; `(76, 14, 0)` in `airfield_ammo.png`, `(35, 25, 0)` in `airfield_objective_2.png`) |
+| 5 | **Character** on the cell, or a character's alternate cell (editor modes 5, 6, 7) | `People.obj` frame from the soldier table, or the dice `Token.obj` frame 11 on an alternate cell (§9.2) | Confirmed (every soldier cell and every alternate cell carries it) |
+| 7 | **Information token** on the cell (editor mode 10, "Info") | `Token.obj` frame 5 (orange folder) | Confirmed (cells equal the information token table cells in all 95 maps) |
+| 8 | Alternate draw | Walls and clutter drawn through `sub_4447D5` instead of `sub_451610` | Unknown purpose |
+| 9 | **Land Mine** (editor mode 11) | `Token.obj` frame 4, raised 24 px on some floor types | Confirmed (mode 11 sets `|= 0x200`) |
+| 10 | **Reinforcement token** on the cell (editor modes 14–16) | `Token.obj` frame from the token table (§9.2) | Confirmed (cells equal the token table cells in all 95 maps) |
+| 12–17 | `Can.obj` frame of the ground object | used with bit 4 | Confirmed |
+| 16–17 | Unknown | set in every cell | Unknown |
+| 18–20 | Floor cover level | see above | Confirmed rule |
+| 23 | **Lockable** (editor mode 23) | `Token.obj` frame 12 (padlock) | Confirmed |
+| 24–26 | **Multiplayer** marker $n$ = 1–4 (editor modes 25–28) | `Token.obj` frame $n - 1$ (soldier icons 1–4) | Confirmed; presumably the start cells of players 1–4 |
+| 28–30 | Area effect $n$ (5 seen) | `Token.obj` frame $n + 12$ (fire, smoke, cloud sprites) | Confirmed draw; purpose unknown |
+| 31 | **Medical** (editor mode 17) | `Token.obj` frame 10 (red cross) | Confirmed |
+
+A cell with bit 5 and no soldier standing on it is a character's **alternate cell**: there
+`sub_435562` finds no matching position and draws the dice, `Token.obj` frame 11.
+
+**Black Out (editor mode 21)** does not use `dword5`: it clears bits of `byte4`
+(`byte_559638`, case 21 of the placement handler, line 39774 ff.). About a quarter of all cells in the shipped maps have
+`byte4 = 0x00`, typically building interiors. What the eight individual bits stand for is
+unknown, since only `0xFF` and `0x00` occur.
 
 ---
 
@@ -332,11 +364,13 @@ Every `.map` is paired with an ASCII `.txt` file of the same name (e.g. `Single_
 This file is read by `sub_451B7D` in `SAW_TD_NOTES.c`:
 
 ### Structure
-1. Mission briefing and diary strings, followed by the mission objectives summary text.
-2. 4 lines formatted `<index> : <status>` (e.g., `1 : 0`, `2 : 0` representing objectives).
-3. Playable map width (e.g. `104` for `Airfield`).
-4. Playable map height (e.g. `80` for `Airfield`).
-5. Mission seed / parameter integer (e.g. `15839`). Absent in the version-19 `Menu/Demo.txt`.
+1. Lines 1–40: the popup message of each information token, line $N + 1$ for Token ID $N$
+   (§9.2); empty when the token has no text. All 95 version 21 mission files have 49 lines.
+2. Line 41: the mission briefing. Line 42 is empty.
+3. 4 lines formatted `<index> : <status>` (e.g., `1 : 0`, `2 : 0` representing objectives).
+4. Playable map width (e.g. `104` for `Airfield`).
+5. Playable map height (e.g. `80` for `Airfield`).
+6. An integer that changes each time the map is saved (`15839` in `Airfield.txt`, `18275` after re-saving the same map); a checksum or save stamp, not a mission seed. Absent in the version-19 `Menu/Demo.txt`.
 
 ### Playable Window Placement
 The binary `.map` buffer always stores the full $130 \times 100 \times 7$ grid. The playable
@@ -369,8 +403,10 @@ at a larger size and shrunk afterwards, leaving stale content outside the declar
 of them.
 
 > [!NOTE]
-> **Open**: the routine that assigns `word_550318` / `word_55031C` has not been located, so the
-> centering formula is empirical (it fits all maps) rather than read from the code.
+> The window is also stored explicitly in the map stream (§9.3): four integers hold the maximum
+> and minimum column and row, and they equal the centered window above for all 95 version 21
+> maps. The visualizer reads those values and uses the `.txt` rule only as a fallback. The code
+> that copies them into `word_550318` / `word_55031C` has not been located.
 
 ---
 
@@ -500,21 +536,244 @@ This is the visualizer's painter's-algorithm ordering; it follows the per-cell d
 
 ---
 
-## 9. Post-Tile Array Records in Map Stream
+## 9. Post-Tile Record Tables
 
-Immediately following the 1,183,000-byte tile array (offset `1,183,193` / `0x120E39`), `sub_445F25` unpacks mission state structures:
+Immediately following the 1,183,000-byte tile array (offset `1,183,193` / `0x120E39`), the map
+loader `sub_445F25` reads a fixed sequence of record tables (lines 41838–41983).
 
-| Table | Count | Record Size | Total Size | Global Array | Hypothesized Purpose |
-|---|---|---|---|---|---|
-| Canisters / Containers | 40 | 18 bytes | 720 bytes | `dword_554A80` | Ammo boxes, item crates, ground pickups |
-| Interactive Objects | 40 | 6 bytes | 240 bytes | `dword_559230` | Doors, levers, explosive barrels |
-| Triggers / Zones | 40 | 14 bytes | 560 bytes | `dword_554F60` | Extraction areas, reinforcement triggers |
-| Waypoints / Squad Nodes | 10 | 340 bytes | 3,400 bytes | `word_550538` | AI patrol paths and squad waypoint lists |
-| Soldier / Unit Records | 40 | 1,760 bytes | 70,400 bytes | `unk_847E50` | Placed soldiers, equipment, health, stats |
-| AI Nodes | 40 | 18 bytes | 720 bytes | `word_883800` | Tactical navigation graph nodes |
-| Mission Parameters | — | ~4,000 bytes | ~4,000 bytes | `word_884750` | Victory condition rules, faction alignments |
+### 9.1 Table Boundaries (version 21) — Confirmed
 
-The record counts and sizes above are estimates from the read loops and have not been validated against data. The version-19 stream (`Menu/Demo.MAP`) is 20 bytes shorter than version 21 (1,214,539 vs 1,214,559 bytes); the difference lies somewhere in these records.
+The read calls, transcribed in order, total **31,366 bytes**, which is exactly
+`1,214,559 − 1,183,193`. Decoded with this layout, all 95 version 21 maps are consumed to the
+last byte. Table ids use the address of the destination global.
+
+| # | Table id | Working name | Slots × size | Bytes | Stream record layout | Status |
+|---|---|---|---|---|---|---|
+| 1 | `T-554A80` | information tokens | 40 × 18 | 720 | `u32 target, u16 target type, u16 radius, u16, u16 condition, u16 causes, cell` | Confirmed (radius: hypothesis) |
+| 2 | `T-559230` | reinforcement tokens | 40 × 6 | 240 | `cell, u16 frame` | Confirmed |
+| 3 | `T-554F60` | soldier positions | 40 × 14 | 560 | `cell, u16 hidden, u16, alternate cell, u16 frame` | Confirmed |
+| 4 | `T-550538` | turret groups | 10 × 180 | 1,800 | `u16 state, 5 × u16, 40 bytes, 4 × u16, 20 × (cell, u16 frame)` | Confirmed |
+| 5 | `S-543F18` | playable window | 1 × 18 | 18 | `i32 max_x, i32 max_y, i32 min_x, i32 min_y, u16` | Confirmed |
+| 6 | `T-558FE8` | — | 8 × 8 | 64 | `8 bytes` | Unknown |
+| 7 | `T-550328` | — | 8 × 8 | 64 | `8 bytes` | Unknown |
+| 8 | `S-884828` | editor selection | 1 × 6 | 6 | `u16 x, u16 y, u16` | Hypothesis: cell last selected in the editor |
+| 9 | `T-847E50` | soldiers | 40 × 424 | 16,960 | `10 scalars (22 bytes), 4 × u32, u16, 192 × u16` | Role confirmed; fields mostly unknown |
+| 10 | `S-847E50B` | soldier arrays | 2 × 80 | 160 | `40 × u16` | Hypothesis: appearance percentage per soldier, then a 0/1 flag per soldier |
+| 11 | `T-883800` | reinforcements | 40 × 18 | 720 | `u16 nationality, character type, percentage, controller, ai, turn/token, entry condition, amount, u16` | Confirmed |
+| 12–16 | `S-884750A` … `S-884750E` | mission parameters | — | 198 | five blocks of 16, 8 × 8, 16, 8 × 12, and 6 bytes | Unknown |
+| 17 | `T-8923C0` | — | 100 × 6 | 600 | `3 × u16` | Unknown |
+| 18 | `T-892AD0` | items | 500 × 18 | 9,000 | `u16 holder type, u32 holder, u16, u16 class, u16 kind, u16, u32` | Holder confirmed; class and kind hypotheses |
+| 19 | `T-559530` | — | 8 × 32 | 256 | `4 × 8 bytes` | Unknown |
+
+`cell` is a 32-bit linear cell index, $Z \times 13000 + Y \times 130 + X$, the same index as the
+tile array; `0xFFFFFFFF` means "no cell".
+
+The complete field list, with the evidence status and decompilation reference of every field,
+is the declarative layout in `src/saw_map/formats/record_layout.py`. Running the viewer with
+`--dump-records` prints every table of a map with those names.
+
+> [!IMPORTANT]
+> **Retracted**: earlier revisions listed seven estimated tables here (for example "Soldier /
+> Unit Records, 40 × 1,760 bytes = 70,400 bytes" and "Triggers / Zones"). 1,760 bytes is the
+> in-memory record stride; only 424 bytes per soldier are stored. The estimated names and sizes
+> are superseded by the table above.
+
+### 9.2 Placement Tables — Confirmed from the Draw Routines
+
+The engine draws the built-in archives from these tables. Each rule below was read from the
+decompilation and then checked against all 95 version 21 maps.
+
+**Soldiers — `T-554F60` joined with `T-847E50` by slot** (`sub_435562`, line 36481)
+- The routine searches the 40 slots for `dword_554F68[4i]` equal to the drawn cell index (the
+  first stream field) and requires `word_554F66[8i] == 0` (the `hidden` field).
+- It draws `People.obj` frame `word_554F64[8i]` (the last stream field) at the cell's anchor.
+- Data check: all 1,853 frames are below the 168 frames of `People.obj`; every soldier cell
+  carries cell flag bit 5; 26 soldiers have a non-zero `hidden` value.
+- Screenshot check: in `Airfield.map` slot 17 is at `(44, 41, 0)` with frame 88, a soldier in
+  camouflage, and appears at that position beside the Ju 52 in `airfield_airplane.png`.
+- The slot index is the editor's **Character ID** (`airfield_dices_3_character.png` shows ID 23).
+- **Alternate cell (confirmed)**: the fourth stream field of `T-554F60` (`dword_554F60[4i]`,
+  memory offset `+0`) is a second position for the soldier, written by the editor's character
+  relocation mode (mode 7, line 39636 ff.). The editor marks it with the dice. In Airfield 13 soldiers
+  have one, and the dice of `airfield_dices_1.png`, `_2.png`, `_3.png` at `(51, 42, 0)`,
+  `(56, 25, 0)`, `(69, 50, 0)` are the alternate cells of slots 16, 22, and 23. All 276
+  alternate cells in the 95 maps carry cell flag bit 5. How the game chooses between the two
+  positions has not been traced.
+- **Soldier record fields** (`T-847E50`). The Character Stats dialog has six dropdown lists, and
+  each stored value is the index into its list. Checked against the dialog values of four
+  Airfield characters: ID 9 at `(37, 24, 0)` (Lt Colonel, Pistol / Submachinegun), ID 10 at
+  `(36, 23, 0)` (Sgt Major, Submachinegun / Semi/Automatic), ID 39 at `(38, 27, 0)` (Staff Sgt,
+  Semi/Automatic / Pistol), and ID 23 at `(90, 38, 0)` (German, Computer, Guard, Senior Sgt,
+  Bolt Action / Submachinegun, percentage 100, encumbrance 30).
+
+  | Field (memory offset) | IDs 9 / 10 / 39 / 23 | Meaning | Status |
+  |---|---|---|---|
+  | `+280` nationality | 2 / 2 / 2 / 2 | Bit codes: 1 American, 2 German, 4 Neutral, 8 French, 16 Italian | Confirmed for 1, 2, 4 (reinforcement table; civilians added in the editor are 4). 8 and 16 follow the list order and are supported by the body types they use (see appearance) |
+  | `+284` rank | 13 / 7 / 8 / 6 | Index into: Private, 1st Private, Lance Cpl, Sr Lance Cpl, Corporal, Sargeant, Senior Sgt, Sgt Major, Staff Sgt, 2nd Lieutenant, Lieutenant, Captain, Major, Lt Colonel, Brigadier, Maj General, Lt General, General, Col General | Confirmed (4 of 4; all maps use 0–18) |
+  | `+290` controller | 0 / 0 / 0 / 0 | 0 Computer, 1 Human | Confirmed (1 for the 8 player soldiers of Airfield) |
+  | `+292` ai | 6 / 5 / 1 / 1 | Index into: Follower, Guard, Hider, Mach Gunner, Medic, Seeker, Stationary, Wander | Confirmed for Stationary (ID 9), Guard (ID 23), and Seeker (reinforcement dialog); the others by list order; all maps use 0–7 |
+  | `+318` primary training | 1 / 2 / 4 / 3 | Index into: None, Pistol, Submachinegun, Bolt Action, Semi/Automatic, Machinegun, Explosive | Confirmed (4 of 4; all maps use 0–6) |
+  | `+322` secondary training | 2 / 4 / 1 / 2 | Same list | Confirmed (4 of 4) |
+  | `+724` encumbrance | 30 / 30 / 30 / 30 | Encumbrance | Hypothesis (matches the one dialog value seen; range 17–32) |
+  | `+300` field medic | 0 / 0 / 0 / 0 | The "Field Medic" checkbox: 0 or 1 | Confirmed by a controlled edit (see below) |
+  | `+796` facing | 4 / 3 / 5 / 5 | Screen direction, clockwise from north: 0 N, 1 NE, 2 E, 3 SE, 4 S, 5 SW, 6 W, 7 NW (north = up, south = bottom of the screen) | Confirmed: IDs 9, 10, 39 face S, SE, SW in the editor |
+  | `+12` appearance | 12 / 11 / 11 / 11 | Body type 0–20. Usage in the 95 maps: 0–7 American, 8–12 German, 13 Italian (all 102 soldiers of nationality 16), 14 French, 15 male civilian, 16 female civilian (Neutral and French), 17–20 rare | Confirmed by the frame formula below; 15 and 16 confirmed by the civilians edit |
+  | `+306` | — | `0xFFFF` in 1,822 of 1,853 soldiers, 0 otherwise | Unknown |
+  | `+308` | 82 / 72 / 73 / 80 | 0–89 in original soldiers; `0xFFFF` in characters newly created with the editor. Possibly the index of a predefined character (name, portrait) | Hypothesis |
+  | `+326` (192 words) | — | Loadout: indices into the item table | Confirmed (all 27,813 non-empty words in 95 maps reference an in-use item slot) |
+
+> [!NOTE]
+> **Soldier sprite frame formula.** `People.obj` has 168 frames = 21 body types × 8 directions.
+> The soldier's sprite frame equals
+> $$\text{frame} = 8 \times \text{appearance} + (\text{facing} + 4) \bmod 8$$
+> for **1,831 of 1,852 soldiers** in the 95 version 21 maps. Within a body type the frames
+> therefore run S, SW, W, NW, N, NE, E, SE. The frame stored in the position table is redundant
+> with the two soldier fields; the 21 exceptions are presumably records edited inconsistently.
+
+- **Controlled edit (`Airfield_MEDIC.MAP`)**: the user ticked "Field Medic" for Character ID 9
+  in the Scenario Builder and saved the map under a new name. Compared with `Airfield.map`, the
+  decompressed stream differs in 40 bytes:
+  - Soldier record 9, stream offset 8 (memory `+300`): `0 → 1`. This is the only change in
+    the soldier table, so it is the Field Medic flag. Four soldiers in the shipped maps have it.
+  - A new information token in slot 1 at `(63, 50, 0)` with flag bit 7 on that cell: the folder
+    of `airfield_folder_2.png`, placed during the editing session. Its record is the cell index
+    in both `target` and `cell` and zero elsewhere, which confirms that a cell-assigned token
+    stores its own cell as target.
+  - `S-884828`: `57, 49 → 37, 24`, the cell of the edited character (hypothesis: the cell last
+    selected in the editor).
+  - 18 bytes of the header's editor state (cursor, scroll, brush, active mode `10 → 5`).
+  - The companion `.txt` is identical except for its last line (`15839 → 18275`).
+
+- **Controlled edit (`Airfield_CIVILIANS.MAP`)**: the user removed the two characters at
+  `(91, 66, 0)` and `(93, 67, 0)` and added a male civilian at `(91, 66, 0)` and a female
+  civilian at `(92, 66, 0)`. Compared with `Airfield.map`, 319 bytes differ:
+  - The editor reused the freed slots: Character IDs 6 and 7 now hold the civilians. Slot 7's
+    position moved to `(92, 66, 0)`; cell flag bit 5 was cleared on `(93, 67, 0)` and set on
+    `(92, 66, 0)`.
+  - Civilian records: nationality 4 (Neutral), controller Computer, AI 2 (Hider), no training,
+    rank Private / 1st Private, encumbrance 30, facing 5 (SW), appearance 15 (male) and 16
+    (female). Their frames, 121 and 129, satisfy the frame formula.
+  - Offset `+308` changed from 39 and 65 to `0xFFFF`, and the second soldier array changed
+    from 1 to 0 for both slots.
+  - All 16 items held by the removed soldiers (holder 6 or 7) were freed to `0xFF`, and the
+    loadout grids of both slots were emptied. This is what identified the item holder fields.
+  - `S-884828` became `93, 67`, the last cell clicked, as in the first edit.
+  - The mission `.txt` again differs only in its last line (`15839 → 16419`).
+- **Appearance percentage (hypothesis)**: the first array of `S-847E50B` holds one value per
+  soldier, 100 for ID 23 as in the dialog; values range from 5 to 100 over all maps.
+
+**Reinforcement tokens — `T-559230` with `T-883800` by slot** (`sub_434FB0`, line 36363; lookup `sub_447F93`, line 42494)
+- For a cell with flag bit 10 the routine finds the slot with that cell and draws `Token.obj`
+  frame `word_559234[4i]`.
+- Data check: the cells of used slots equal the cells with flag bit 10 in every map. Frames in
+  shipped maps: 8 (cross, 1,261 slots), 9 (flag, 128), 7 (star, 23).
+- The editor writes the frame from its mode (cases 14–16 of the placement handler): "A Reinforce" → 7,
+  "G Reinforce" → 8, "N Reinforce" → 9. They are American, German, and Neutral reinforcement
+  entry points. Airfield has 32 German tokens, the "GermanTokens 32" of
+  `airfield_reinforcement_token_2.png`.
+- `T-883800` holds the settings of each token, slot for slot. For the token at `(75, 88, 0)`
+  (slot 0) the record is `2, 3, 50, 0, 5, 0, 0, 1, 0` and the dialog shows Amount 1, Character
+  Type SS Infantry, Percentage 50, Controller Computer, AI Seeker, Entry Condition Target
+  Eliminate, Turn/Token 0:
+
+  | Word | Slot 0 | Meaning | Status |
+  |---|---|---|---|
+  | 0 | 2 | Nationality (1 / 2 / 4 pair exactly with frames 7 / 8 / 9 in all 95 maps) | Confirmed |
+  | 1 | 3 | Character type, index into the dialog's list. For German tokens: Infantry, Grenadier, Officer, SS Infantry, SS Officer (German tokens use 0–4; American tokens 0–7 and Neutral tokens 0–1, whose lists are not known) | Confirmed for the German list |
+  | 2 | 50 | Percentage | Confirmed |
+  | 3 | 0 | Controller: 0 Computer, 1 Human (0 in every used slot) | Confirmed |
+  | 4 | 5 | Artificial intelligence, index into the soldier AI list; the dialog offers only Seeker and Wander and the data holds only 5 and 7 | Confirmed |
+  | 5 | 0 | "Turn/Token": a turn number with entry condition Turn Limit (0–30), a token id with Condition (0–30), 1 with Trigger, 0 otherwise | Confirmed |
+  | 6 | 0 | Entry condition, index into: Target Eliminate, Target Get, Target Destination, Sighted, Trigger, Turn Limit, Condition (values 0, 1, 4, 5, 6 occur; Turn Limit and Condition account for 1,151 of 1,412 tokens) | Confirmed |
+  | 7 | 1 | Amount (1–6 over all maps) | Confirmed |
+  | 8 | 0 | Always 0 | Unknown |
+
+**Information tokens — `T-554A80`** (mission triggers and objectives)
+- Written by the editor's "Info" mode (mode 10, line 39522 ff.), which stores the record and
+  sets cell flag bit 7; the editor's dialog for them is titled "Information Token". Earlier
+  revisions called this table "containers"; the editor's "Canister" mode places `Can.obj`
+  objects through cell flags instead (§3.7).
+- Unused slots are all `0xFF`. The last stream field is the cell.
+- Data check: the cells of used slots equal the cells with flag bit 7 in every map (550 slots),
+  where the engine draws the orange folder, `Token.obj` frame 5.
+- **The slot index is the Token ID.** `airfield_objective_3.png` shows the token on
+  `(35, 25, 0)` with Token ID 3, and that cell belongs to slot 3. The mission-ending screen
+  lists the same token as "3. Target Get, One Goal Met, ITEM=Map Rad=0".
+- **Popup text (confirmed for Airfield)**: line $N + 1$ of the companion `.txt` file is the
+  message of Token ID $N$. Line 4 of `Airfield.txt` is word for word the "Popup Message Text" of
+  token 3 in `airfield_objective_4.png` ("Searching through the office you stumble upon the
+  map..."), and line 1 ("You open up your notebook and double-check the mission
+  objectives...") belongs to token 0, which sits among the player's soldiers at `(92, 67, 0)`
+  (`airfield_folder_1.png`). Over all maps 145 used tokens have a message and 405 have none.
+- **Fields (confirmed)**. Each list value is the index into the dialog's dropdown list. Stream
+  record of Airfield token 3: `56, 9, 0, 0, 1, 3, cell`; its dialog shows Assign Token: Item
+  "1. Map", Condition Target Get, Causes One Goal Met, Token Radius 0.
+
+  | Field | Token 3 | Token 0 | Meaning | Evidence over the 550 used slots of 95 maps |
+  |---|---|---|---|---|
+  | `target` (u32) | 56 | 8802 | What the token is assigned to, read according to `target_type` | Type 0: the token's own cell index in 348 of 348. Type 5: a soldier slot in use in 192 of 192. Type 9: an item slot in use in 10 of 10 (token 3 → slot 56, the Map in the canister) |
+  | `target_type` | 9 | 0 | "Assign Token": 0 Cell, 5 Character, 9 Item | Character targets pair with Target Eliminate (142) or Target Get (50); item targets always with Target Get |
+  | `radius` | 0 | 15 | Token Radius | 0–32; hypothesis (one dialog value) |
+  | (word) | 0 | 0 | Always 0 | Unknown |
+  | `condition` | 1 | 0 | Index into: None, Target Get, Target Eliminate, Target Destination, Trigger | Only values 0–4 occur |
+  | `causes` | 3 | 0 | Index into: None, Immediate Victory, Immediate Defeat, One Goal Met | Only values 0, 2, 3 occur (no shipped token causes an immediate victory) |
+  | `cell` | (35, 25, 0) | (92, 67, 0) | Position | Equals the cells with flag bit 7 |
+
+  The item holder types of `T-892AD0` use the same codes for cell (0) and character (5).
+
+> [!NOTE]
+> `airfield_folder_2.png` shows a folder at `(63, 50, 0)` that is absent from the shipped
+> `Airfield.map` (the installed file is byte-identical to the research copy). It was placed
+> during the screenshot session: the editor was in "Info" mode, in which a click on an empty
+> cell places an information token. The token is present in the user's later save
+> `Airfield_MEDIC.MAP` (see the controlled edit above).
+
+**Turret groups — `T-550538`** (`sub_4352FD`, line 36425)
+- The routine considers only groups whose first word (`state`) is 0, compares the drawn cell
+  with the part cells, and draws `Turret.obj` frame `word_550570[170g + 6i]`.
+- Every group in shipped maps has exactly 9 parts covering 3 × 3 cells, with frames
+  $10k + 1 \dots 10k + 9$ (all below the 320 frames of `Turret.obj`).
+- Screenshot check: the single Airfield group has `state = 1` and is not visible in
+  `airfield_map_level_7.png`, in agreement with the rule. Groups with a non-zero state are
+  therefore decoded but not drawn.
+
+**Ground objects and editor markers** come from cell flags, not from a table; see the flag
+bit map in §3.7.
+
+**Items — `T-892AD0`** (mission item pool)
+- 500 slots; unused slots are all `0xFF` (186 of 500 in Airfield). Stream record:
+  `u16 holder_type, u32 holder, u16, u16 item_class, u16 item_kind, u16, u32`.
+- **Holder (confirmed)**: every item is held either by a soldier or by a canister.
+
+  | `holder_type` | `holder` | Evidence |
+  |---|---|---|
+  | 5 | Soldier slot (Character ID) | 10,529 of 10,546 such items appear in exactly that soldier's loadout. Removing soldiers 6 and 7 in the editor freed exactly the items whose holder was 6 or 7 (controlled edit below). |
+  | 0 | Cell index of a canister | All 4,072 such items lie on a cell with the canister flag (§3.7). 885 of the 902 canister objects in the 95 maps hold at least one item. |
+
+- **Canister contents**: the items whose holder is the canister's cell. In Airfield the canister
+  at `(35, 25, 0)` holds item slot 56, class 5 kind 7, the "1. Map" of the Canister dialog in
+  `airfield_objective_2.png`, and information token 3 names slot 56 as its target. The object at
+  `(76, 14, 0)` of `airfield_ammo.png` holds two items of class 4 kind 23.
+- **Loadout grid**: the 192 loadout words of a soldier are 8 inventory areas × 4 rows × 6
+  columns (loop at lines 41910–41915). Each word is an item slot; an item larger than one grid
+  cell repeats its slot over the cells it covers (a rifle fills 4 × 2 cells).
+- `item_class` (1–5) and `item_kind` are hypotheses: no name table has been matched yet. The
+  loader special-cases class 1 (line 41974). The two remaining words are always `0xFFFF`.
+- **Retracted**: an earlier revision read the last 32-bit field as "the cell of the canister
+  holding the item". That field is not a position; the canister cell is the `holder` field.
+
+### 9.3 Playable Window — Confirmed
+
+Block 5 (`dword_543F18`, `dword_543F14`, `dword_543F1C`, `dword_543F20`) holds the exclusive
+maximum column and row and the inclusive minimum column and row of the playable area. In
+`Airfield.map` the values are `117, 90, 13, 10`. For all 95 version 21 maps they equal the
+window obtained by centering the dimensions of the companion `.txt` file (§4).
+
+### 9.4 Version 19
+
+`Menu/Demo.MAP` (version 19) has 31,346 bytes after the tile array, 20 fewer than version 21.
+Which fields are absent is unknown; the older reader has not been transcribed. The visualizer
+reports its records as an unsupported layout and loads the tile grid normally.
 
 ---
 
@@ -543,9 +802,31 @@ tileset's clutter partition (order and evidence in §3.4):
 - `+3`: `People.obj` (Soldiers placed on the map)
 - `+4`: `Turret.obj` (Anti-aircraft flak guns, machine gun nests)
 
-No tile word in any shipped map references these indices. Soldiers, canisters, and tokens seen
-in the editor screenshots come from the post-tile records (§9), which this project does not
-decode yet.
+No tile word in any shipped map references these indices. Soldiers, reinforcement tokens,
+information tokens, and turrets are placed by the post-tile record tables (§9.2); items and canisters
+(`Can.obj`) and the editor markers (`Token.obj`) are placed by cell flag bits (§3.7).
+`Cgendam.obj` has no known placement in map files.
+
+#### Scenario Builder Modes
+The status bar "Mode" names and their internal ids (switch at lines 79854–79917):
+0 Tile, 1 Left Object, 2 Right Object, 3 Center Object, 4 ALL Object, 5 Character,
+6 Relocate Char., 9 Item, 10 Info, 11 Land Mine, 12 Mission Exit, 13 Multiplayer,
+14 A Reinforce, 15 G Reinforce, 16 N Reinforce, 17 Medical, 18 Canister, 19 Nothing,
+21 Black Out, 22 Turrent, 23 Lockable. "Info" is the placement mode for information tokens;
+clicking an existing object in it opens that object's dialog.
+
+#### Screenshot Cross-Checks (second set)
+| Screenshot | Shows | Decoded as |
+|---|---|---|
+| `airfield_dices_1/2/3.png` | Dice at `(51, 42, 0)`, `(56, 25, 0)`, `(69, 50, 0)` | Alternate cells of soldiers 16, 22, 23 |
+| `airfield_dices_3_character.png` | Character ID 23: German, Computer, Senior Sgt., Guard, Bolt Action / Submachinegun, 100 %, encumbrance 30 | Soldier slot 23: nationality 2, controller 0, rank 6, ai 1, training 3 / 2, percentage 100, encumbrance 30 |
+| `airfield_ammo.png` | Ammo on the floor at `(76, 14, 0)` | Cell flag bit 4, `Can.obj` frame 48; a canister holding two items |
+| `airfield_information_token.png` | Blue diamond outlines along the map edge at level 1 | Mission Exit cells (flag bit 0), 27 in the map |
+| `airfield_reinforcement_token_1/2.png` | Three crosses at `(74–76, 88, 0)`; 32 German tokens; amount 1, SS Infantry, 50 %, Computer, Seeker, Target Eliminate, turn/token 0 | Token slots 0–2, frame 8; reinforcement record of slot 0: `2, 3, 50, 0, 5, 0, 0, 1, 0` |
+| `airfield_folder_1.png` | Folder at `(92, 67, 0)` | Information token 0 (radius 15, notebook text) |
+| `airfield_objective_1.png`, `_2.png` | Canister at `(35, 25, 0)` holding "1. Map" | Canister flag with `Can.obj` frame 48; item slot 56 held by that cell |
+| `airfield_objective_3.png`, `_4.png` | Information Token ID 3: Item "Map", Target Get, One Goal Met, radius 0, popup text | Information token slot 3 (`target_type` 9, `target` 56, `condition` 1, `causes` 3, `radius` 0); text = line 4 of `Airfield.txt` |
+| `airfield_folder_2.png` | Folder at `(63, 50, 0)` | Placed during the editing session; saved as information token 1 in `Airfield_MEDIC.MAP` (§9.2) |
 
 ### 10.3 Default Ground Fill
 - A word with bit 15 clear is absent, whatever its low bits (`0x0000`, `0x0001`).
@@ -585,25 +866,34 @@ decode yet.
 ## 11. Open Research Questions & Future Reverse-Engineering Targets
 
 1. **Cell Flag Bits (`dword5`)**:
-   Meaning of the bits other than the cover level (§3.7): bits 16–17, bits 1, 5, and 8 used in
-   `sub_4508F9`, and any line-of-sight or movement flags.
-2. **Cell Attribute Byte (`byte4`)**:
-   Semantics of the `0xFF` / `0x00` byte at stream offset `+8`.
-3. **Playable Window Assignment**:
-   Locate the code that sets the minimum drawable column/row (`word_550318`, `word_55031C`) to
-   confirm the centering formula of §4.
-4. **Post-Tile Records (§9)**:
-   Exact layouts of the entity tables, including the 1,760-byte soldier record (nationality,
-   inventory, facing), and how placed soldiers, canisters, and tokens map to `People.obj`,
-   `Can.obj`, and `Token.obj` frames.
-5. **Version 19 / 20 Streams**:
+   Bits 1, 8, 16–17 and the area effect marker on bits 28–30 (§3.7); any line-of-sight or
+   movement flags.
+2. **Black-Out Mask (`byte4`)**:
+   What the eight bits of the mask stand for, and how the game reveals blacked-out cells.
+3. **Soldier Records (`T-847E50`)**:
+   The two remaining scalars (`+306`, `+308`); how the game picks between a soldier's position
+   and its alternate cell, and the role of the appearance percentage. Further controlled edits
+   in the Scenario Builder (change one value, save under a new name, diff) are the quickest way
+   to settle these.
+4. **Unidentified Tables**:
+   `T-558FE8`, `T-550328`, `T-8923C0`, `T-559530`, the second soldier array, and the mission
+   parameter blocks (victory conditions, weather, and start time are expected there).
+5. **Information Tokens, Items, and Reinforcements**:
+   The always-zero word of `T-554A80` and confirmation of the radius; the names behind item
+   class and kind, and the last field of the item record; the character type lists of American
+   and Neutral reinforcement tokens.
+6. **Turret Group State**:
+   What a non-zero state means (inactive, destroyed, or scripted) and when it changes.
+7. **Version 19 / 20 Streams**:
    Which post-tile fields differ from version 21 (20-byte size difference for version 19).
-6. **Alternate Draw Routine `sub_4447D5`**:
+8. **Playable Window Globals**:
+   The code that copies the stored window (§9.3) into `word_550318` / `word_55031C`.
+9. **Alternate Draw Routine `sub_4447D5`**:
    Used for walls and clutter when `dword5` bit 8 is set.
-7. **Sound & Ambience Triggers**:
-   Mapping of sound effect identifiers triggered by ambient clutter objects and door interactions.
-8. **Mini-map Format (`minimap.col` / `Data/minimap.col`)**:
-   Decompression and packing of pre-baked minimap overhead thumbnails.
+10. **Sound & Ambience Triggers**:
+    Mapping of sound effect identifiers triggered by ambient clutter objects and door interactions.
+11. **Mini-map Format (`minimap.col` / `Data/minimap.col`)**:
+    Decompression and packing of pre-baked minimap overhead thumbnails.
 
 ---
 
@@ -626,6 +916,11 @@ All references refer to the decompiled `SAW.EXE` / `SAW_TD.EXE` disassembly (`Re
 | `sub_444B7D` | 41484 | `0x00444B7D` | **Frame Anchor Y Setter**: Overwrites internal `offset_y` anchor during runtime offset recalibration. |
 | `sub_445F25` | 41777 | `0x00445F25` | **Map Reader**: Unpacks the 193-byte header (lines 41801–41826), the 3D cell array ($7 \times 100 \times 130 \times 13$ bytes) into 16-byte memory records (lines 41827–41837), and the mission entity tables that follow. |
 | `sub_4508F9` | 45053 | `0x004508F9` | **Cell Render Dispatcher**: Walks a cell column upwards, skips cells below the minimum column/row, tests the floor cover level against `word_8AED06`, and issues drawing calls to `sub_451610`. |
+| `sub_434FB0` | 36363 | `0x00434FB0` | **Token Table Draw**: For a cell with flag bit 10, draws the `Token.obj` frame of the matching token slot. |
+| `sub_43505D` | 36388 | `0x0043505D` | **Cell Flag Marker Draw**: Draws `Token.obj` markers and the `Can.obj` ground object selected by cell flag bits. |
+| `sub_4352FD` | 36425 | `0x004352FD` | **Turret Part Draw**: Draws the `Turret.obj` frame of the turret group part standing on a cell (groups with state 0 only). |
+| `sub_435562` | 36481 | `0x00435562` | **Soldier Draw**: Draws the `People.obj` frame of the soldier whose position equals the cell, unless its hidden word is set. |
+| `sub_447F93` | 42494 | `0x00447F93` | **Token Slot Lookup**: Returns the token table slot for a cell. |
 | `sub_43C795` | 38526 | `0x0043C795` | **View Level Setter**: Clamps and stores the active view level in `word_8AED06`. |
 | `sub_451610` | 45238 | `0x00451610` | **Draw Call Dispatcher**: Resolves `dword_7C58B0[a1]` by flat group index `a1 = W & 0x7F` and draws frame `a2 = (W >> 7) & 0xFF` at $(X + \Delta X, Y + \Delta Y)$. |
 | `sub_451B7D` | 45363 | `0x00451B7D` | **Mission Text Parser**: Parses companion `.txt` file, extracting the playable width and height. |
@@ -646,6 +941,14 @@ All references refer to the decompiled `SAW.EXE` / `SAW_TD.EXE` disassembly (`Re
 | `word_8AED06` | `int16` | **Active View Level** ($0 \dots 6$, default 6). A floor is drawn only while its cover level (`dword5` bits 18–20) is greater than this value. |
 | `word_550318`, `word_55031C` | `int16` | Minimum drawable column and row (start of the playable window). |
 | `byte_554EE0[128]` | `char[128]` | Tileset name read from the map header. |
+| `dword_554F60[]` | 16-byte records | Soldier position table: `+0` alternate cell, `+4` `People.obj` frame, `+6` hidden word, `+8` cell index. |
+| `dword_559230[]` | 8-byte records | Reinforcement token table: `+0` cell index, `+4` `Token.obj` frame. |
+| `word_883800[]` | 18-byte records | Reinforcement settings, one record per token slot. |
+| `dword_554A80[]` | 28-byte records | Information token table (18 bytes stored); cell index at `+16`; the slot index is the Token ID. |
+| `byte_559638[]` | byte per cell | Black-out mask (`byte4` of the cell). |
+| `word_550538[]` | 340-byte records | Turret groups: `+0` state, `+0x34` part cell indices, `+0x38` part frames (6-byte stride). |
+| `unk_847E50` | 1,760-byte records | Soldier records; 424 bytes of each are stored in the map stream. |
+| `dword_543F18`, `543F14`, `543F1C`, `543F20` | `int` | Stored playable window: max column, max row, min column, min row. |
 | `word_6BCDB0` | `int16` | **Active Component Slot**: Currently selected editor sub-component index ($0 = \text{word0}, 1 = \text{word1}, 2 = \text{word2}, 3 = \text{word3}$). Stored in the map header at `0xBA`. |
 | `word_555FE0` | `uint16` | **Render Feature Mask**: Bit 0 = render floors (`word0`); Bit 1 = render walls and clutter (`word1` .. `word3`); Bit 2 and Bit 11 = further overlays. |
 | `word_543F04` | `int16` (64) | Isometric tile half-width in pixels ($T_w / 2 = 64$). |

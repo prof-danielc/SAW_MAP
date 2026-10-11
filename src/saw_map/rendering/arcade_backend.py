@@ -61,6 +61,8 @@ _KEY_ACTIONS: Dict[int, InputAction] = {
     arcade.key.KEY_2: InputAction.TOGGLE_LEFT_WALLS,
     arcade.key.KEY_3: InputAction.TOGGLE_RIGHT_WALLS,
     arcade.key.KEY_4: InputAction.TOGGLE_CLUTTER,
+    arcade.key.KEY_5: InputAction.TOGGLE_ENTITIES,
+    arcade.key.KEY_6: InputAction.TOGGLE_MARKERS,
     arcade.key.P: InputAction.CYCLE_PALETTE,
     arcade.key.F11: InputAction.TOGGLE_FULLSCREEN,
     arcade.key.F: InputAction.TOGGLE_FULLSCREEN,
@@ -261,6 +263,8 @@ class ArcadeRenderer(IRenderer):
             show_left_walls=self.camera.show_left_walls,
             show_right_walls=self.camera.show_right_walls,
             show_clutter=self.camera.show_clutter,
+            show_entities=self.camera.show_entities,
+            show_markers=self.camera.show_markers,
         )
 
         is_iso = self.camera.perspective == ViewPerspective.ISOMETRIC
@@ -295,7 +299,7 @@ class ArcadeRenderer(IRenderer):
         if not self.asset_loader:
             return None
 
-        asset_name = item.asset_name or "placeholder"
+        asset_name = item.asset_name or f"placeholder:{int(item.component_type)}"
         key = (asset_name.lower(), item.sprite_frame_index, palette.name)
 
         if key in self._texture_cache:
@@ -575,13 +579,13 @@ class ArcadeRenderer(IRenderer):
                 )
                 y -= 20
                 if cell:
-                    info = CellInspector.inspect_cell(cell, self.tileset)
+                    info = CellInspector.inspect_cell(cell, self.tileset, self.map_doc.entities_at(hx, hy, hz))
                     self._sidebar_texts.append(
                         arcade.Text(f"Tile Name: {info.primary_tile_label}", left + 14, y, arcade.color.CYAN, 9, bold=True)
                     )
                     y -= 18
                     self._sidebar_texts.append(
-                        arcade.Text(f"Elevation: 0x{cell.elevation_attr:02X} ({cell.elevation_attr})", left + 14, y, (180, 185, 190), 9)
+                        arcade.Text(f"Black-out mask: 0x{cell.elevation_attr:02X}", left + 14, y, (180, 185, 190), 9)
                     )
                     y -= 16
                     self._sidebar_texts.append(
@@ -616,6 +620,14 @@ class ArcadeRenderer(IRenderer):
                             )
                             y -= 14
 
+                    for heading, detail in OverlayModel.get_entity_lines(info.entities):
+                        self._sidebar_texts.append(
+                            arcade.Text(f"◆ {heading}", left + 14, y, arcade.color.GOLD, 9, bold=True)
+                        )
+                        y -= 13
+                        self._sidebar_texts.append(arcade.Text(f"   {detail}", left + 14, y, (220, 225, 230), 8))
+                        y -= 16
+
             else:
                 y = float(win_h) - 46
                 self._sidebar_texts.append(
@@ -633,6 +645,8 @@ class ArcadeRenderer(IRenderer):
                     ("  [PgUp/PgDn] Change Layer", (150, 155, 165), False),
                     ("  [Tab] Toggle Iso/TopDown", (150, 155, 165), False),
                     ("  [1-4] Toggle Layers", (150, 155, 165), False),
+                    ("  [5] Toggle Entities", (150, 155, 165), False),
+                    ("  [6] Toggle Editor Markers", (150, 155, 165), False),
                     ("  [P] Cycle Palette", (150, 155, 165), False),
                 ]
                 for text_val, col_val, is_b in tips:

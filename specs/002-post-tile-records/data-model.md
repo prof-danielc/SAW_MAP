@@ -63,8 +63,9 @@ classDiagram
         +int x
         +int y
         +int z
-        +str source_table
+        +str source
         +int slot_index
+        +str label
         +str sprite_archive
         +int sprite_frame
         +dict attributes
@@ -113,6 +114,9 @@ Static description of one table: the reverse-engineered knowledge.
 | `fields` | `list[FieldSpec]` | Fields in stream order |
 | `status` | `EvidenceStatus` | Evidence status of the table's interpretation |
 | `source_reference` | `str` | Decompilation line range the layout was transcribed from |
+| `used_cell_field` | `Optional[str]` | Cell field that must be valid for a slot to count as in use |
+| `unused_when_all_ff` | `bool` | Slots filled with `0xFF` are unused |
+| `description` | `str` | What the table is believed to hold |
 
 `record_size` is the sum of the field sizes.
 
@@ -143,20 +147,21 @@ A record interpreted as something standing on the map.
 
 | Field | Type | Description | Validation |
 |---|---|---|---|
-| `category` | `EntityCategory` | `SOLDIER`, `CONTAINER`, `ITEM`, `ZONE`, `TURRET`, `UNIDENTIFIED` | — |
+| `category` | `EntityCategory` | `SOLDIER`, `RELOCATION`, `TOKEN`, `INFO`, `CANISTER`, `TURRET`, `ITEM`, `MARKER` | — |
 | `x`, `y`, `z` | `int` | Absolute grid cell and level | $0 \le x < 130$, $0 \le y < 100$, $0 \le z < 7$ |
-| `source_table` | `str` | `table_id` of the record it comes from | — |
-| `slot_index` | `int` | Slot of that record | — |
+| `source` | `str` | `table_id` of the record it comes from, or `"cell flags"` | — |
+| `slot_index` | `int` | Slot of that record; `-1` for cell-flag entities | — |
+| `label` | `str` | Short readable description | — |
 | `sprite_archive` | `Optional[str]` | Archive that draws it, when confirmed | `None` → drawn as marker |
 | `sprite_frame` | `Optional[int]` | Frame within the archive, when confirmed | — |
-| `attributes` | `dict[str, value]` | Further decoded properties (e.g. `side`) | — |
+| `attributes` | `dict[str, value]` | Further decoded properties (e.g. `side`, `hidden`, turret `group` / `state`) | — |
 | `anomalies` | `list[str]` | Problems found (outside playable window, unresolved reference) (FR-009) | — |
 
 ### 2.6 Enumerations
 
 - **DecodeStatus**: `DECODED`, `UNSUPPORTED_VERSION`, `SIZE_MISMATCH`, `MISSING`.
 - **EvidenceStatus**: `CONFIRMED`, `HYPOTHESIS`, `UNKNOWN`.
-- **EntityCategory**: `SOLDIER`, `CONTAINER`, `ITEM`, `ZONE`, `TURRET`, `UNIDENTIFIED`.
+- **EntityCategory** (named after the Scenario Builder modes): `SOLDIER`, `RELOCATION` (a soldier's alternate cell, drawn as a dice), `TOKEN` (reinforcement token), `INFO` (information token: a mission trigger or objective, drawn as a folder), `CANISTER` (`Can.obj` item placed by cell flags), `TURRET`, `ITEM`, `MARKER` (editor markers placed by cell flags).
 
 ---
 
@@ -164,26 +169,26 @@ A record interpreted as something standing on the map.
 
 | Entity | Change |
 |---|---|
-| `MapDocument` | New `post_tile: Optional[PostTileData]`, `entities: list[PlacedEntity]`, and `entities_at(x, y, z)`. `origin_x`, `origin_y`, `width`, `height` are taken from the stored window when `post_tile.status` is `DECODED`. |
+| `MapDocument` | New `post_tile: Optional[PostTileData]`, `entities: list[PlacedEntity]`, `entities_at(x, y, z)`, and `token_messages: list[str]` (popup text per information token id; `mission_text` is the briefing line only). `origin_x`, `origin_y`, `width`, `height` are taken from the stored window when `post_tile.status` is `DECODED`. |
 | `ComponentType` | New member `ENTITY = 4`, sorted after `CLUTTER` within a cell. |
 | `RenderItem` | May reference a `PlacedEntity` instead of a cell component. |
-| `Camera` | New `show_entities: bool = True`. |
-| `InputAction` | New `TOGGLE_ENTITIES`. |
-| `CellInspectionInfo` | New `entities: list[PlacedEntity]` for the inspected cell. |
+| `Camera` | New `show_entities: bool = True` and `show_markers: bool = False`. |
+| `InputAction` | New `TOGGLE_ENTITIES` and `TOGGLE_MARKERS`. |
+| `CellInspectionInfo` | New `entities: tuple[PlacedEntity, ...]` for the inspected cell. |
 
 ---
 
 ## 4. Initial Table Catalogue (version 21)
 
-Statuses as established in [research.md](research.md); they are updated as implementation
-confirms or refutes them.
+Statuses after implementation (see [research.md](research.md) §9). The authoritative,
+per-field version is `src/saw_map/formats/record_layout.py`.
 
 | `table_id` | Working name | Slots × size | Table status | Entities produced |
 |---|---|---|---|---|
-| `T-554A80` | `containers` | 40 × 18 | Hypothesis | `CONTAINER` |
-| `T-559230` | `zone_cells` | 40 × 6 | Hypothesis | `ZONE` |
-| `T-554F60` | `soldier_positions` | 40 × 14 | Confirmed (position) | `SOLDIER` (joined with `T-847E50`) |
-| `T-550538` | `groups` | 10 × 180 | Unknown | — |
+| `T-554A80` | `information_tokens` | 40 × 18 | Confirmed (role, cell, slot = Token ID) | `INFO` |
+| `T-559230` | `tokens` | 40 × 6 | Confirmed | `TOKEN` (joined with `T-883800`) |
+| `T-554F60` | `soldier_positions` | 40 × 14 | Confirmed (cell, hidden, alternate cell, frame) | `SOLDIER` (joined with `T-847E50`) and `RELOCATION` |
+| `T-550538` | `turret_groups` | 10 × 180 | Confirmed | `TURRET` (one per part) |
 | `S-543F18` | `playable_window` | 1 × 18 | Confirmed | — |
 | `T-558FE8` | `table_558FE8` | 8 × 8 | Unknown | — |
 | `T-550328` | `table_550328` | 8 × 8 | Unknown | — |
@@ -195,3 +200,4 @@ confirms or refutes them.
 | `T-8923C0` | `table_8923C0` | 100 × 6 | Unknown | — |
 | `T-892AD0` | `items` | 500 × 18 | Hypothesis | `ITEM` (only slots with a cell) |
 | `T-559530` | `table_559530` | 8 × 32 | Unknown | — |
+| — (cell flags) | — | — | Confirmed | `CANISTER`, `MARKER` |

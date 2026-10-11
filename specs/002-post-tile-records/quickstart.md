@@ -18,7 +18,7 @@ Scenarios that prove the feature works end to end. Interfaces are defined in
 
 ### Scenario 1: Layout and reader unit tests
 ```bash
-pytest tests/unit/test_record_layout.py tests/unit/test_records_reader.py tests/unit/test_entities.py -v
+pytest tests/unit/test_records_reader.py tests/unit/test_entities.py -v
 ```
 **Expected**: the version 21 layout totals 31,366 bytes; a synthetic stream built from the
 layout round-trips field values; truncated and oversized streams yield `SIZE_MISMATCH`; an
@@ -62,10 +62,10 @@ window opens, exit code `0`.
 python run_viewer.py "Research/SSI/Soldiers at War/Single_g/Airfield.map" --game-dir "Research/SSI/Soldiers at War"
 ```
 1. Navigate to the aircraft on the central dirt area.
-2. Compare with `Research/EditorScreenshots/airfield_airplane.png`: a soldier marker stands
-   beside the aircraft at cell `(44, 41, 0)`.
-3. Press `5`: all entity markers disappear and the terrain is unchanged (SC-008). Press `5`
-   again to restore them.
+2. Compare with `Research/EditorScreenshots/airfield_airplane.png`: the same soldier in
+   camouflage stands beside the aircraft at cell `(44, 41, 0)`.
+3. Press `5`: all placed entities disappear and the terrain is unchanged (SC-008). Press `5`
+   again to restore them. Press `6` to show the editor markers stored in cell flags.
 4. Hover a soldier's cell with the sidebar open (`I`): the entity and its decoded fields are
    listed below the tile components.
 5. Lower the view level with `Q` / `PageDown` below an elevated entity: it disappears with its

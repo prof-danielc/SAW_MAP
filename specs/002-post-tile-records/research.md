@@ -216,3 +216,180 @@ The post-tile block is 31 KB; decoding it is negligible next to the 1.18 MB tile
 ### Decision
 No special optimisation. The existing 2-second load and 60 FPS budgets are kept as acceptance
 checks.
+
+---
+
+## 9. Findings Established During Implementation
+
+Tracing the engine's draw routines for the built-in archives (task T013) settled most of the
+hypotheses of sections 4 and 5. Each rule was validated against all 95 version 21 maps; details
+and counts are in `REVERSE_ENGINEERING_INFO.md` §3.7 and §9.2.
+
+| Topic | Earlier status | Outcome |
+|---|---|---|
+| Soldier sprite | Unknown; plan was to draw markers | **Confirmed**: last field of the position table is the `People.obj` frame (`sub_435562`). Soldiers are drawn with their real sprites and match `airfield_airplane.png`. |
+| Position table field 2 | Unknown | **Confirmed**: a non-zero value hides the soldier (`sub_435562`). |
+| "Zone cells" table `T-559230` | Hypothesis | **Corrected**: it is the token table; the second field is a `Token.obj` frame (`sub_434FB0`). Its cells equal the cells with flag bit 10 in every map. |
+| Containers `T-554A80` | Hypothesis | Cell field **confirmed** (equals the cells with flag bit 7 in every map); the role and other fields remain hypotheses. |
+| "Groups" table `T-550538` | Unknown | **Confirmed**: turret groups of 9 parts drawn from `Turret.obj` (`sub_4352FD`); only groups with state 0 are drawn, which the Airfield screenshot corroborates. |
+| Turret storage | Unknown | Resolved by the row above. |
+| Canisters / pickups | Expected in a table | **Corrected**: ground objects are not in a table; cell flag bit 4 places a `Can.obj` frame taken from flag bits 12–17 (`sub_43505D`). |
+| Editor markers | Not anticipated | Cell flag bits 0, 9, 23, 24–26, 28–30, 31 draw `Token.obj` markers. Exposed as a separate, default-off category. |
+| Soldier side | Hypothesis | Still a hypothesis. |
+| Item table | Hypothesis | Still a hypothesis; only slots with a cell are shown, as sprite-less markers. |
+| Version 19 layout | Unknown | Still unknown; reported as unsupported (task T035 deferred). |
+
+### Decisions revised
+- **Sprites instead of markers for soldiers**: the condition set in section 4 (a frame rule that
+  reproduces the editor screenshot) was met, so soldiers, tokens, containers, ground objects,
+  and active turrets are drawn with their original sprites. Only placed items, whose sprite is
+  unknown, use the placeholder marker.
+- **Two toggles instead of one**: placed entities (key `5`, on by default) and editor markers
+  (key `6`, off by default), because some markers cover thousands of cells.
+- **Entity categories**: `SOLDIER`, `TOKEN`, `CONTAINER`, `GROUND_OBJECT`, `TURRET`, `ITEM`,
+  `MARKER` replace the provisional list of the data model.
+
+---
+
+## 10. Second Screenshot Set (dice, ammo, exits, reinforcements, folders)
+
+A further set of Scenario Builder screenshots prompted a second pass. The editor's own mode
+names (switch at lines 79854–79917 of `SAW_TD_NOTES.c`) and its placement handler
+(lines 39380–39800) settled the naming; details are in `REVERSE_ENGINEERING_INFO.md` §3.7,
+§9.2, and §10.2.
+
+| Observation | Finding | Status |
+|---|---|---|
+| Dice on three cells; clicking one shows "Character Stats" | The fourth field of the soldier position table is an **alternate cell** for the soldier. The dice cells are the alternate cells of soldiers 16, 22, 23; the Character ID is the slot index. | Confirmed |
+| Character Stats of ID 23 | Soldier record: nationality (confirmed), controller, AI, encumbrance (hypotheses). A per-soldier percentage sits in the first soldier array (hypothesis). Loadout words are item slot indices (confirmed). | Mixed |
+| Ammo on the floor at `(76, 14, 0)` | Already decoded: cell flag bit 4 with a `Can.obj` frame. The editor calls these "Item" / "Canister". | Confirmed |
+| Blue outlined cells along the map edge | **Mission Exit** cells, cell flag bit 0 (editor mode 12). Previously labelled "tile mark". | Confirmed |
+| Cross tokens with a "German Reinforcements" dialog | The token table holds reinforcement tokens (frame 7 Allied, 8 German, 9 Neutral). Table `T-883800` holds their settings by slot: nationality and percentage confirmed, the rest hypotheses. | Mixed |
+| Orange folder | Table `T-554A80` holds **Info** items (editor mode 10), not containers. | Confirmed |
+| Folder at `(63, 50, 0)` in `airfield_folder_2.png` | Not present in either research copy of `Airfield.map`; probably placed during the screenshot session, since "Info" is a placement mode. | Open |
+| Cell byte `+8` | The editor's "Black Out" mode clears its bits: it is a black-out mask. | Confirmed role; bit meanings unknown |
+
+### Decisions revised
+- Entity categories renamed to the editor's terms: `CONTAINER` → `INFO`, `GROUND_OBJECT` →
+  `CANISTER`; new category `RELOCATION` for alternate soldier cells, drawn as the dice.
+- Marker labels follow the editor modes: mission exit, land mine, medical, lockable,
+  multiplayer marker.
+- Reinforcement settings and soldier attributes are attached to their entities and shown in
+  the sidebar.
+
+---
+
+## 11. Objective Cell (35, 25, 0) of Airfield
+
+Screenshots `airfield_objective_1..4.png` show a canister holding "1. Map" and an "Information
+Token" dialog (Token ID 3, Item "Map", Condition Target Get, Causes One Goal Met, radius 0, with
+a popup text). Details are in `REVERSE_ENGINEERING_INFO.md` §9.2.
+
+| Finding | Status |
+|---|---|
+| Table `T-554A80` holds **information tokens**: mission triggers and objectives. The slot index is the Token ID (slot 3 is on this cell). | Confirmed |
+| The popup text of Token ID $N$ is line $N + 1$ of the companion `.txt` file. Line 4 of `Airfield.txt` is the text of token 3 word for word; line 1 belongs to token 0. Line 41 is the briefing. | Confirmed for Airfield; all 95 mission files have the same 49-line structure |
+| Record fields: condition (9 = Target Get), radius, causes (1 = One Goal Met), and a target reference. | Hypotheses (one dialog) |
+| Items of the item table that carry a cell lie in the canister on that cell; item slot 0 is the "Map". | Confirmed |
+
+### Decisions revised
+- The `INFO` entity is labelled "information token N" and carries condition, causes, radius, and
+  the popup message; the sidebar shows an abbreviated message.
+- `MapDocument.token_messages` holds the 40 message lines; `mission_text` is now the briefing
+  only (line 41), no longer every line before the objective block.
+
+---
+
+## 12. Character Stats Fields
+
+The user supplied the rank and training of three more Airfield characters and the full contents
+of the six dropdown lists of the Character Stats dialog. Comparing them with the soldier records
+of those characters (IDs 9, 10, 39) and of ID 23 resolved the open fields: every stored value is
+the index into its dropdown list.
+
+| Field | Outcome | Status |
+|---|---|---|
+| Rank | Memory offset `+284`; 13 / 7 / 8 / 6 for Lt Colonel / Sgt Major / Staff Sgt / Senior Sgt | Confirmed (4 of 4) |
+| Primary and secondary training | Offsets `+318` and `+322`; all eight values match | Confirmed |
+| Artificial intelligence | Offset `+292`, alphabetical list; Guard = 1 and Seeker = 5 verified | Confirmed for those two; rest by list order |
+| Controller | Offset `+290`; 0 Computer, 1 Human | Confirmed |
+| Nationality | 1 American, 2 German, 4 Neutral, 8 French, 16 Italian | 8 and 16 assigned by list order |
+| Facing and appearance | Offsets `+796` and `+12`; `People.obj` frame = 8 × appearance + (facing + 4) mod 8 for 1,831 of 1,852 soldiers | Confirmed |
+
+Still unknown in the soldier record: offsets `+300`, `+306`, `+308`, and where the Field Medic
+checkbox is stored.
+
+### Decision
+Soldier and reinforcement entities expose these values by name (for example `rank=Lt Colonel`),
+using the dropdown lists as lookup tables; values outside a list are shown as numbers.
+
+---
+
+## 13. Controlled Edit: Field Medic, Facing, and the Session Folder
+
+The user confirmed AI "Stationary" for Character ID 9, gave the facing of three characters, and
+saved an edited copy of the map (`Airfield_MEDIC.MAP`, in the installed game folder) after
+ticking "Field Medic" for ID 9. Diffing the decompressed streams gave:
+
+| Finding | Status |
+|---|---|
+| **Field Medic** is the 32-bit field at memory offset `+300` of the soldier record (0 → 1; the only change in the soldier table). | Confirmed |
+| **Facing** values are screen directions clockwise from north: 0 N … 7 NW (IDs 9, 10, 39 face S, SE, SW with values 4, 3, 5). | Confirmed |
+| AI list order: Stationary = 6 for ID 9. | Confirmed (third verified entry) |
+| The folder at `(63, 50, 0)` was placed in the editing session; it is information token 1 in the saved copy. A cell-assigned token stores its own cell as target. | Confirmed |
+| `S-884828` changed to the edited character's cell: probably the cell last selected in the editor. | Hypothesis |
+| The last line of the mission `.txt` changed on save: a checksum or stamp, not a seed. | Hypothesis |
+
+The installed `Airfield.map` is byte-identical to the research copy. The edited map is not part
+of the repository or the automated tests, because it lives outside `Research/`.
+
+### Method note
+Changing one value in the Scenario Builder, saving under a new name, and diffing against the
+original isolates a field in a single step. It is the recommended way to settle the remaining
+unknowns (information token condition and causes lists, reinforcement entry condition and turn,
+soldier offsets `+306` and `+308`).
+
+---
+
+## 14. Controlled Edit: Removing Soldiers and Adding Civilians
+
+The user saved `Airfield_CIVILIANS.MAP` after removing the characters at `(91, 66, 0)` and
+`(93, 67, 0)` and adding a male and a female civilian. The diff against `Airfield.map`
+(319 bytes) is described in `REVERSE_ENGINEERING_INFO.md` §9.2.
+
+| Finding | Status |
+|---|---|
+| **Item holder**: the first two fields of an item record say who holds it: type 5 with a soldier slot, or type 0 with a canister's cell index. Removing two soldiers freed exactly their items. Verified on all maps (10,529 of 10,546 carried items sit in their holder's loadout; all 4,072 canister items lie on canister cells). | Confirmed |
+| **Canister contents** are the items held by the canister's cell; 885 of 902 canisters hold items. The earlier reading of the item record's last field as a cell is retracted. | Confirmed |
+| Information token 3 targets item slot 56, the Map in the canister. | Confirmed |
+| **Loadout** is a grid of 8 areas × 4 rows × 6 columns of item slots. | Confirmed (loader loop and the freed entries) |
+| Civilians: nationality 4, AI Hider, appearance 15 (male) and 16 (female). Appearance usage over all maps: 0–7 American, 8–12 German, 13 Italian, 14 French. | Confirmed for 15 and 16; the rest from usage |
+| The editor reuses freed character slots; new characters get `0xFFFF` at offset `+308` (original soldiers have 0–89), so that field may select a predefined character. | Hypothesis |
+| Second soldier array: 1 → 0 when the two player soldiers were replaced. | Hypothesis: marks player-squad members |
+
+### Decisions revised
+- `ITEM` entities are now the items held by canisters (12 in Airfield), placed on the
+  canister's cell; canisters report how many items they hold.
+- Item record fields renamed to `holder_type`, `holder`, `item_class`, `item_kind`.
+
+---
+
+## 15. Dropdown Lists of the Token Dialogs
+
+The user supplied the dropdown lists of the Information Token and Reinforcement dialogs. As
+with the character fields, every stored value is the index into its list; this also showed that
+two information token fields had been named the wrong way round.
+
+| Finding | Status |
+|---|---|
+| Information token word 2 is the **target type** (0 Cell, 5 Character, 9 Item), not the condition. The target then validates on every used slot: own cell (348 of 348), soldier in use (192 of 192), item in use (10 of 10). This confirms the user's supposition that a token can be assigned to a cell, a character, or an item. | Confirmed |
+| Word 5 is the **condition** (None, Target Get, Target Eliminate, Target Destination, Trigger) and word 6 the **causes** (None, Immediate Victory, Immediate Defeat, One Goal Met). Token 3 holds 1 and 3. | Confirmed |
+| Reinforcement **character type** indexes Infantry, Grenadier, Officer, SS Infantry, SS Officer for German tokens. | Confirmed for German tokens |
+| Reinforcement **AI** uses the soldier list indices (5 Seeker, 7 Wander), which also confirms Wander = 7. | Confirmed |
+| Reinforcement word 6 is the **entry condition** (seven-entry list) and word 5 the **Turn/Token** value: a turn for Turn Limit, a token id for Condition. | Confirmed |
+| Controller and amount of the reinforcement record. | Confirmed |
+
+Corrected field order of the information token record: `target, target_type, radius, (0),
+condition, causes, cell`. The earlier assignment (condition at word 2 with value 9, causes at
+word 5 with value 1) was a misreading based on one dialog and is superseded.
+

@@ -13,6 +13,7 @@ from typing import List, Optional
 
 from saw_map.assets.loader import AssetLoader
 from saw_map.diagnostics.logger import configure_logging, get_logger
+from saw_map.diagnostics.records_report import format_records_report
 from saw_map.formats.map_reader import MapReader
 from saw_map.rendering.arcade_backend import ArcadeRenderer
 from saw_map.rendering.backend_base import IRenderer
@@ -87,6 +88,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Rendering backend: arcade (default) or pygame",
     )
     parser.add_argument(
+        "--dump-records",
+        action="store_true",
+        default=False,
+        help="Print the post-tile record tables and placed entities of MAP_FILE and exit",
+    )
+    parser.add_argument(
+        "--dump-unused",
+        action="store_true",
+        default=False,
+        help="With --dump-records, also list unused record slots",
+    )
+    parser.add_argument(
         "--maximize",
         action="store_true",
         default=False,
@@ -142,6 +155,16 @@ def main(args: Optional[List[str]] = None) -> int:
     if not map_path.is_file():
         logger.error(f"Map file not found: '{parsed.map_file}'")
         return 1
+
+    # Diagnostic dump: needs no game assets, renderer, or display
+    if parsed.dump_records:
+        try:
+            map_doc = MapReader.parse_map(map_path)
+        except (ValueError, OSError) as exc:
+            logger.error(f"Corrupted or invalid map file: {exc}")
+            return 2
+        sys.stdout.write(format_records_report(map_doc, include_unused=parsed.dump_unused))
+        return 0
 
     # Resolve game root
     game_root = resolve_game_root(parsed.game_dir, map_path)

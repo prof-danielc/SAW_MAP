@@ -61,6 +61,8 @@ _KEY_ACTIONS: Dict[int, InputAction] = {
     pygame.K_2: InputAction.TOGGLE_LEFT_WALLS,
     pygame.K_3: InputAction.TOGGLE_RIGHT_WALLS,
     pygame.K_4: InputAction.TOGGLE_CLUTTER,
+    pygame.K_5: InputAction.TOGGLE_ENTITIES,
+    pygame.K_6: InputAction.TOGGLE_MARKERS,
     pygame.K_p: InputAction.CYCLE_PALETTE,
     pygame.K_F11: InputAction.TOGGLE_FULLSCREEN,
     pygame.K_f: InputAction.TOGGLE_FULLSCREEN,
@@ -163,7 +165,7 @@ class PygameRenderer(IRenderer):
         if not self.asset_loader:
             return None
 
-        asset_name = item.asset_name or "placeholder"
+        asset_name = item.asset_name or f"placeholder:{int(item.component_type)}"
         key = (asset_name.lower(), item.sprite_frame_index, palette.name)
 
         if key in self._surface_cache:
@@ -235,6 +237,8 @@ class PygameRenderer(IRenderer):
             show_left_walls=self.camera.show_left_walls,
             show_right_walls=self.camera.show_right_walls,
             show_clutter=self.camera.show_clutter,
+            show_entities=self.camera.show_entities,
+            show_markers=self.camera.show_markers,
         )
 
         center_x = self.width / 2.0 + (self.camera.x * self.camera.zoom)
@@ -447,12 +451,12 @@ class PygameRenderer(IRenderer):
             self.screen.blit(coord_txt, (left + 14, y))
             y += 20
             if cell:
-                info = CellInspector.inspect_cell(cell, self.tileset)
+                info = CellInspector.inspect_cell(cell, self.tileset, self.map_doc.entities_at(hx, hy, hz))
                 tile_txt = self.font_bold.render(f"Tile Name: {info.primary_tile_label}", True, (0, 220, 220))
                 self.screen.blit(tile_txt, (left + 14, y))
                 y += 18
                 elev_txt = self.font.render(
-                    f"Elevation: 0x{cell.elevation_attr:02X} ({cell.elevation_attr})", True, (180, 185, 190)
+                    f"Black-out mask: 0x{cell.elevation_attr:02X}", True, (180, 185, 190)
                 )
                 self.screen.blit(elev_txt, (left + 14, y))
                 y += 16
@@ -485,6 +489,14 @@ class PygameRenderer(IRenderer):
                         raw_txt = self.font.render(f"   Raw: 0x{comp.raw_word:04X}", True, (110, 115, 120))
                         self.screen.blit(raw_txt, (left + 14, y))
                         y += 16
+
+                for heading, detail in OverlayModel.get_entity_lines(info.entities):
+                    head_txt = self.font_bold.render(f"◆ {heading}", True, (218, 165, 32))
+                    self.screen.blit(head_txt, (left + 14, y))
+                    y += 15
+                    det_txt = self.font.render(f"   {detail}", True, (220, 225, 230))
+                    self.screen.blit(det_txt, (left + 14, y))
+                    y += 18
         else:
             y = 48
             no_sel = self.font_bold.render("No cell hovered", True, (180, 185, 190))
@@ -501,6 +513,8 @@ class PygameRenderer(IRenderer):
                 "  [PgUp/PgDn] Change Layer",
                 "  [Tab] Toggle Iso/TopDown",
                 "  [1-4] Toggle Layers",
+                "  [5] Toggle Entities",
+                "  [6] Toggle Editor Markers",
                 "  [P] Cycle Palette",
             ]
             for tip in tips:
