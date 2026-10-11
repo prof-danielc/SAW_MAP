@@ -23,8 +23,8 @@ The tool parses original binary `.map` files, companion `.set` definitions, `.ob
   - Instant perspective toggling between Dimetric Isometric and 2D Top-Down.
   - Hot-swapping between daylight (`Win.pal`) and night/ambient (`Darkpal.col`) color palettes.
 - **Inspection Tools & Overlays**:
-  - **Tile Inspector Sidebar**: Real-time tile picking displaying 3D grid coordinates, component presence flags, tileset group indices, sprite frame numbers, terrain attribute bytes, and bitflags.
-  - **Minimap Overlay**: Picture-in-picture tactical minimap with interactive viewport bounding rectangle.
+  - **Tile Inspector Sidebar**: Real-time cell inspection displaying coordinates, elevation attribute, cell flags DWORD, and all 4 component slots (Roof/Ceiling/Mask, Left Wall, Right Wall, Ground Surface/Clutter) with raw 16-bit hex words, resolved asset names, and sprite frame indices.
+  - **Minimap Overlay**: Picture-in-picture 2D orthogonal tactical minimap featuring procedural terrain surface colors (snow, hangar stone, dirt, railroad tracks, wood, metal, grass) and interactive camera viewport diamond frustum.
   - **Status HUD**: Real-time camera coordinates, zoom factor, active elevation layer, and rendering backend indicator.
 - **Strict Architecture Principles**:
   - Pure Python data models, format readers, and coordinate math are 100% decoupled from graphics engines.
@@ -129,10 +129,10 @@ The visualizer provides a unified set of controls across both the Arcade and Pyg
 
 | Control | Action | Description |
 |---|---|---|
-| <kbd>1</kbd> | **Toggle Floors** | Show or hide ground terrain / surface components (`word0`) |
+| <kbd>1</kbd> | **Toggle Roofs / Ceilings** | Show or hide roof, ceiling, and upper cutaway components (`word0`) |
 | <kbd>2</kbd> | **Toggle Left Walls** | Show or hide left wall components (`word1`) |
 | <kbd>3</kbd> | **Toggle Right Walls** | Show or hide right wall components (`word2`) |
-| <kbd>4</kbd> | **Toggle Clutter** | Show or hide clutter, foliage, and object components (`word3`) |
+| <kbd>4</kbd> | **Toggle Surface / Clutter** | Show or hide procedural ground surface and clutter components (`word3`) |
 
 ---
 

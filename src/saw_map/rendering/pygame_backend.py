@@ -21,6 +21,8 @@ from saw_map.rendering.backend_base import IRenderer
 from saw_map.rendering.draw_order import DrawOrderStrategy, RenderItem
 from saw_map.rendering.fallback import create_placeholder_sprite
 from saw_map.viewer.camera import Camera, ViewPerspective
+from saw_map.viewer.inspector import CellInspector
+from saw_map.viewer.minimap import MinimapCalculator, generate_minimap_image
 
 logger = get_logger("rendering.pygame")
 
@@ -42,8 +44,12 @@ class PygameRenderer(IRenderer):
 
         self.iso_transform = IsometricTransform()
         self.top_transform = TopDownTransform()
+        self._inspector = CellInspector(self.iso_transform, self.top_transform)
 
         self._surface_cache: Dict[Tuple[str, int, str], Tuple[pygame.Surface, int, int]] = {}
+        self._minimap_calc = MinimapCalculator(box_width=160.0, box_height=120.0, margin=12.0)
+        self._minimap_surface: Optional[pygame.Surface] = None
+        self._minimap_cache_layer: Optional[int] = None
         self.hovered_cell: Optional[Tuple[int, int, int]] = None
         self.width: int = 1280
         self.height: int = 720
@@ -136,7 +142,7 @@ class PygameRenderer(IRenderer):
         self._surface_cache.clear()
 
     def update_hover(self, mx: int, my: int) -> None:
-        """Calculates grid cell under cursor."""
+        """Calculates grid cell under cursor using top-down raycast picking."""
         if not self.map_doc:
             return
 
@@ -146,21 +152,9 @@ class PygameRenderer(IRenderer):
         world_sx = (mx - center_x) / self.camera.zoom
         world_sy = (my - center_y) / self.camera.zoom
 
-        z_plane = float(
-            self.camera.isolated_layer
-            if self.camera.isolated_layer is not None
-            else self.camera.active_max_layer
+        self.hovered_cell = self._inspector.pick_cell_from_world_coords(
+            world_sx, world_sy, self.camera, self.map_doc
         )
-
-        if self.camera.perspective == ViewPerspective.ISOMETRIC:
-            gx, gy = self.iso_transform.screen_to_world(world_sx, world_sy, z_plane)
-        else:
-            gx, gy = self.top_transform.screen_to_world(world_sx, world_sy, z_plane)
-
-        if 0 <= gx < self.map_doc.width and 0 <= gy < self.map_doc.height:
-            self.hovered_cell = (gx, gy, int(z_plane))
-        else:
-            self.hovered_cell = None
 
     def render_frame(self, camera: Camera) -> None:
         """Renders complete frame to display surface."""
@@ -224,6 +218,10 @@ class PygameRenderer(IRenderer):
 
             self.screen.blit(draw_surf, (draw_x, draw_y))
 
+        # Selection box for currently inspected cell
+        if self.hovered_cell:
+            self._draw_selection_box()
+
         # Overlays
         self._draw_status_bar()
         if self.camera.show_minimap:
@@ -232,6 +230,45 @@ class PygameRenderer(IRenderer):
             self._draw_sidebar()
 
         pygame.display.flip()
+
+    def _draw_selection_box(self) -> None:
+        """Renders highlighted selection diamond/square over the currently inspected cell."""
+        if not self.hovered_cell or not self.map_doc or not self.screen:
+            return
+
+        hx, hy, hz = self.hovered_cell
+        is_iso = self.camera.perspective == ViewPerspective.ISOMETRIC
+        zoom = self.camera.zoom
+        center_x = self.width / 2.0 + (self.camera.x * zoom)
+        center_y = self.height / 2.0 + (self.camera.y * zoom)
+
+        if is_iso:
+            sx, sy = self.iso_transform.world_to_screen(hx, hy, hz)
+            world_pts = [
+                (sx, sy),
+                (sx + 64.0, sy + 32.0),
+                (sx, sy + 64.0),
+                (sx - 64.0, sy + 32.0),
+            ]
+        else:
+            sx, sy = self.top_transform.world_to_screen(hx, hy, hz)
+            cw = self.top_transform.cell_size
+            world_pts = [
+                (sx, sy),
+                (sx + cw, sy),
+                (sx + cw, sy + cw),
+                (sx, sy + cw),
+            ]
+
+        screen_pts = [
+            (int(center_x + (px * zoom)), int(center_y + (py * zoom)))
+            for px, py in world_pts
+        ]
+
+        overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        pygame.draw.polygon(overlay, (0, 230, 255, 45), screen_pts)
+        pygame.draw.polygon(overlay, (0, 230, 255, 240), screen_pts, width=2)
+        self.screen.blit(overlay, (0, 0))
 
     def _draw_status_bar(self) -> None:
         """Renders HUD status bar at bottom."""
@@ -251,7 +288,13 @@ class PygameRenderer(IRenderer):
         ]
         if self.hovered_cell:
             hx, hy, hz = self.hovered_cell
-            parts.append(f"Hover: ({hx}, {hy}, {hz})")
+            cell = self.map_doc.get_cell(hx, hy, hz)
+            tile_info = ""
+            if cell:
+                c_info = CellInspector.inspect_cell(cell, self.tileset)
+                if c_info.primary_tile_name:
+                    tile_info = f" [{c_info.primary_tile_name}:{c_info.primary_tile_frame}]"
+            parts.append(f"Hover: ({hx}, {hy}, {hz}){tile_info}")
 
         status_text = " | ".join(parts)
         text_surf = self.font.render(status_text, True, (220, 225, 230))
@@ -263,27 +306,81 @@ class PygameRenderer(IRenderer):
 
         self.screen.blit(text_surf, (12, self.height - bar_h + 6))
 
+    def _update_minimap_cache(self) -> None:
+        """Generates and caches 2D top-down terrain surface from map cell data."""
+        if not self.map_doc:
+            self._minimap_surface = None
+            return
+
+        active_z = (
+            self.camera.isolated_layer
+            if self.camera.isolated_layer is not None
+            else self.camera.active_max_layer
+        )
+        if self._minimap_surface is not None and self._minimap_cache_layer == active_z:
+            return
+
+        pil_img = generate_minimap_image(self.map_doc, self.tileset, active_z)
+        raw_bytes = pil_img.tobytes()
+        surf = pygame.image.fromstring(raw_bytes, pil_img.size, "RGBA")
+        if pygame.display.get_init():
+            try:
+                surf = surf.convert_alpha()
+            except pygame.error:
+                pass
+        self._minimap_surface = surf
+        self._minimap_cache_layer = active_z
+
     def _draw_minimap(self) -> None:
-        """Renders 2D top-down minimap in top-right corner."""
+        """Renders 2D top-down minimap with terrain visualization and camera frustum."""
         if not self.map_doc:
             return
-        mw, mh = 140, 110
-        left = self.width - mw - 12
-        top = 12
 
-        pygame.draw.rect(self.screen, (10, 12, 16), (left, top, mw, mh))
-        pygame.draw.rect(self.screen, (218, 165, 32), (left, top, mw, mh), 1)
+        self._update_minimap_cache()
+        if not self._minimap_surface:
+            return
+
+        offset_r = 260.0 if self.camera.show_sidebar else 0.0
+        bounds = self._minimap_calc.get_minimap_bounds(self.width, self.height, offset_right=offset_r)
+
+        # Background box and gold border
+        pygame.draw.rect(self.screen, (10, 12, 16), (int(bounds.left), int(bounds.top), int(bounds.width), int(bounds.height)))
+        pygame.draw.rect(self.screen, (218, 165, 32), (int(bounds.left), int(bounds.top), int(bounds.width), int(bounds.height)), 1)
 
         title = self.font.render("MINIMAP (M)", True, (218, 165, 32))
-        self.screen.blit(title, (left + 6, top + 4))
+        self.screen.blit(title, (int(bounds.left) + 8, int(bounds.top) + 4))
 
-        scale_x = (mw - 16) / max(1.0, float(self.map_doc.width))
-        scale_y = (mh - 28) / max(1.0, float(self.map_doc.height))
-        frame_rect = pygame.Rect(left + 8, top + 22, int(self.map_doc.width * scale_x), int(self.map_doc.height * scale_y))
-        pygame.draw.rect(self.screen, (80, 90, 100), frame_rect, 1)
+        # Terrain frame bounds inside box
+        inner_w = bounds.width - 16.0
+        inner_h = bounds.height - 26.0
+        scale = min(
+            inner_w / max(1.0, float(self.map_doc.width)),
+            inner_h / max(1.0, float(self.map_doc.height)),
+        )
+        disp_w = max(1, int(self.map_doc.width * scale))
+        disp_h = max(1, int(self.map_doc.height * scale))
+
+        fx = bounds.left + 8.0 + (inner_w - disp_w) / 2.0
+        fy = bounds.top + 20.0 + (inner_h - disp_h) / 2.0
+
+        # Scale and blit terrain surface
+        scaled_terrain = pygame.transform.scale(self._minimap_surface, (disp_w, disp_h))
+        self.screen.blit(scaled_terrain, (int(fx), int(fy)))
+        pygame.draw.rect(self.screen, (80, 90, 100), (int(fx), int(fy), disp_w, disp_h), 1)
+
+        # Camera viewport indicator polygon (diamond in isometric, rectangle in top-down)
+        poly = self._minimap_calc.calculate_viewport_polygon(
+            self.map_doc, self.camera, self.width, self.height, fx, fy, disp_w, disp_h, invert_y=False
+        )
+        if len(poly) >= 3:
+            clamped = [
+                (max(fx, min(fx + disp_w, px)), max(fy, min(fy + disp_h, py)))
+                for px, py in poly
+            ]
+            pygame.draw.polygon(self.screen, (255, 255, 255), clamped, 1)
 
     def _draw_sidebar(self) -> None:
-        """Renders detailed inspection panel on right."""
+        """Renders detailed cell inspection panel on right."""
         side_w = 260
         left = self.width - side_w
         pygame.draw.rect(self.screen, (20, 24, 30), (left, 0, side_w, self.height - 28))
@@ -295,46 +392,75 @@ class PygameRenderer(IRenderer):
         if self.hovered_cell and self.map_doc:
             hx, hy, hz = self.hovered_cell
             cell = self.map_doc.get_cell(hx, hy, hz)
-            y = 45
-            coord_txt = self.font.render(f"Coordinate: ({hx}, {hy}, {hz})", True, (255, 255, 255))
+            y = 42
+            coord_txt = self.font_bold.render(f"Coordinate: ({hx}, {hy}, {hz})", True, (255, 255, 255))
             self.screen.blit(coord_txt, (left + 14, y))
-            y += 24
+            y += 20
             if cell:
-                elev_txt = self.font.render(f"Elevation Byte: {cell.elevation_attr}", True, (180, 185, 190))
+                info = CellInspector.inspect_cell(cell, self.tileset)
+                tile_txt = self.font_bold.render(f"Tile Name: {info.primary_tile_label}", True, (0, 220, 220))
+                self.screen.blit(tile_txt, (left + 14, y))
+                y += 18
+                elev_txt = self.font.render(
+                    f"Elevation: 0x{cell.elevation_attr:02X} ({cell.elevation_attr})", True, (180, 185, 190)
+                )
                 self.screen.blit(elev_txt, (left + 14, y))
-                y += 20
-                flags_txt = self.font.render(f"Cell Flags: 0x{cell.flags:08X}", True, (180, 185, 190))
+                y += 16
+                flags_txt = self.font.render(f"Flags: 0x{cell.flags:08X}", True, (180, 185, 190))
                 self.screen.blit(flags_txt, (left + 14, y))
-                y += 28
+                y += 18
 
-                for label, comp in (
-                    ("Floor", cell.floor),
-                    ("Left Wall", cell.left_wall),
-                    ("Right Wall", cell.right_wall),
-                    ("Clutter", cell.clutter),
-                ):
-                    status = "PRESENT" if comp.is_present else "EMPTY"
+                pygame.draw.line(self.screen, (60, 65, 75), (left + 14, y), (left + side_w - 14, y))
+                y += 8
+
+                for comp in info.components:
                     color = (50, 205, 50) if comp.is_present else (120, 120, 120)
-                    lbl_txt = self.font_bold.render(f"• {label}: {status}", True, color)
+                    slot_header = f"• {comp.slot_name}: {comp.status_label}"
+                    lbl_txt = self.font_bold.render(slot_header, True, color)
                     self.screen.blit(lbl_txt, (left + 14, y))
-                    y += 18
+                    y += 16
+
                     if comp.is_present:
-                        effective_type = (
-                            self.tileset.get_component_type_for_group(comp.tileset_group_index)
-                            if self.tileset
-                            else comp.component_type
+                        raw_txt = self.font.render(
+                            f"   Raw: 0x{comp.raw_word:04X} (G:{comp.tileset_group_index} F:{comp.sprite_frame_index})",
+                            True,
+                            (170, 175, 185),
                         )
-                        asset = (
-                            self.tileset.resolve_asset(effective_type, comp.tileset_group_index)
-                            if self.tileset
-                            else None
-                        )
-                        as_txt = self.font.render(f"   Asset: {asset or 'Unresolved'}", True, (220, 220, 220))
-                        self.screen.blit(as_txt, (left + 14, y))
+                        self.screen.blit(raw_txt, (left + 14, y))
+                        y += 15
+                        det_txt = self.font.render(f"   {comp.details_line}", True, (220, 225, 230))
+                        self.screen.blit(det_txt, (left + 14, y))
+                        y += 18
+                    else:
+                        raw_txt = self.font.render(f"   Raw: 0x{comp.raw_word:04X}", True, (110, 115, 120))
+                        self.screen.blit(raw_txt, (left + 14, y))
                         y += 16
-                        grp_txt = self.font.render(f"   Grp: {comp.tileset_group_index} | Frm: {comp.sprite_frame_index}", True, (160, 160, 160))
-                        self.screen.blit(grp_txt, (left + 14, y))
-                        y += 20
+        else:
+            y = 48
+            no_sel = self.font_bold.render("No cell hovered", True, (180, 185, 190))
+            self.screen.blit(no_sel, (left + 14, y))
+            y += 24
+            tips = [
+                "Move mouse over map",
+                "to inspect components,",
+                "attributes, and flags.",
+                "",
+                "Shortcuts:",
+                "  [I] Toggle Sidebar",
+                "  [M] Toggle Minimap",
+                "  [PgUp/PgDn] Change Layer",
+                "  [Tab] Toggle Iso/TopDown",
+                "  [1-4] Toggle Layers",
+                "  [P] Cycle Palette",
+            ]
+            for tip in tips:
+                if tip:
+                    col = (218, 165, 32) if tip.startswith("Shortcuts:") else (150, 155, 165)
+                    fnt = self.font_bold if tip.startswith("Shortcuts:") else self.font
+                    txt = fnt.render(tip, True, col)
+                    self.screen.blit(txt, (left + 14, y))
+                y += 18
+
 
     def run_loop(self) -> None:
         """Starts Pygame event loop."""
@@ -389,13 +515,17 @@ class PygameRenderer(IRenderer):
         elif key in (pygame.K_PAGEUP, pygame.K_e):
             cam.active_max_layer = min(6, cam.active_max_layer + 1)
             cam.isolated_layer = None
+            self.update_hover(*pygame.mouse.get_pos())
         elif key in (pygame.K_PAGEDOWN, pygame.K_q):
             cam.active_max_layer = max(0, cam.active_max_layer - 1)
             cam.isolated_layer = None
+            self.update_hover(*pygame.mouse.get_pos())
         elif key == pygame.K_l:
             cam.isolated_layer = cam.active_max_layer if cam.isolated_layer is None else None
+            self.update_hover(*pygame.mouse.get_pos())
         elif key in (pygame.K_TAB, pygame.K_t):
             cam.perspective = ViewPerspective.TOP_DOWN if cam.perspective == ViewPerspective.ISOMETRIC else ViewPerspective.ISOMETRIC
+            self.update_hover(*pygame.mouse.get_pos())
         elif key == pygame.K_m: cam.show_minimap = not cam.show_minimap
         elif key == pygame.K_i: cam.show_sidebar = not cam.show_sidebar
         elif key == pygame.K_1: cam.show_floors = not cam.show_floors

@@ -1,0 +1,69 @@
+"""Integration tests for rendering overlays (minimap and sidebar) across backends."""
+
+import os
+import pytest
+from saw_map.assets.loader import AssetLoader
+from saw_map.formats.map_reader import MapReader
+from saw_map.formats.set_parser import TilesetParser
+from saw_map.rendering.pygame_backend import PygameRenderer
+from saw_map.viewer.camera import Camera
+
+
+AIRFIELD_MAP = "Research/SSI/Soldiers at War/Single_g/Airfield.map"
+AIRFIELD_SET = "Research/SSI/Soldiers at War/Sets/Airfield.set"
+
+
+@pytest.mark.skipif(not os.path.exists(AIRFIELD_MAP), reason="Game assets not found")
+def test_pygame_minimap_and_sidebar_rendering():
+    """Validates Pygame rendering frames with minimap and sidebar enabled."""
+    os.environ["SDL_VIDEODRIVER"] = "dummy"
+
+    doc = MapReader.parse_map(AIRFIELD_MAP)
+    tileset = TilesetParser.parse_file(AIRFIELD_SET) if os.path.exists(AIRFIELD_SET) else None
+    loader = AssetLoader("Research/SSI/Soldiers at War")
+
+    renderer = PygameRenderer()
+    renderer.initialize(width=1024, height=768, title="Test Viewport")
+    renderer.set_map(doc, loader, tileset=tileset)
+
+    # 1. Render frame with minimap and sidebar when hovering tile (20, 18, 0)
+    cam = Camera(show_minimap=True, show_sidebar=True)
+    renderer.hovered_cell = (20, 18, 0)
+    renderer.render_frame(cam)
+
+    assert renderer._minimap_surface is not None
+    assert renderer._minimap_surface.get_size() == (doc.width, doc.height)
+
+    # 2. Render frame with no hovered cell
+    renderer.hovered_cell = None
+    renderer.render_frame(cam)
+
+    renderer.close()
+
+
+@pytest.mark.skipif(not os.path.exists(AIRFIELD_MAP), reason="Game assets not found")
+def test_arcade_minimap_and_sidebar_rendering():
+    """Validates Arcade rendering frames with minimap and sidebar enabled."""
+    from saw_map.rendering.arcade_backend import ArcadeRenderer
+
+    doc = MapReader.parse_map(AIRFIELD_MAP)
+    tileset = TilesetParser.parse_file(AIRFIELD_SET) if os.path.exists(AIRFIELD_SET) else None
+    loader = AssetLoader("Research/SSI/Soldiers at War")
+
+    renderer = ArcadeRenderer()
+    renderer.initialize(width=640, height=480, title="Headless Arcade Test")
+    renderer.set_map(doc, loader, tileset=tileset)
+
+    # 1. Render frame with minimap and sidebar when hovering tile (20, 18, 0)
+    cam = Camera(show_minimap=True, show_sidebar=True)
+    renderer.hovered_cell = (20, 18, 0)
+    renderer.render_frame(cam)
+
+    assert renderer._minimap_texture is not None
+
+    # 2. Render frame with no hovered cell
+    renderer.hovered_cell = None
+    renderer.render_frame(cam)
+
+    renderer.close()
+

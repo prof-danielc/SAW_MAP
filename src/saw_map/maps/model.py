@@ -78,6 +78,15 @@ class MapCell:
             or self.clutter.is_present
         )
 
+    def has_visual_content(self) -> bool:
+        """Returns True if any component has an active renderable sprite (frame < 200)."""
+        return (
+            (self.floor.is_present and self.floor.sprite_frame_index < 200)
+            or (self.left_wall.is_present and self.left_wall.sprite_frame_index < 200)
+            or (self.right_wall.is_present and self.right_wall.sprite_frame_index < 200)
+            or (self.clutter.is_present and self.clutter.sprite_frame_index < 200)
+        )
+
     def get_component(self, comp_type: ComponentType) -> CellComponent:
         """Retrieves component by type enum."""
         if comp_type == ComponentType.FLOOR:

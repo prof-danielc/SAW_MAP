@@ -525,3 +525,116 @@ All references refer to the decompiled `SAW.EXE` / `SAW_TD.EXE` disassembly (`Re
 | `word_543EE8` | `int16` | Flat registry index of global `Can.obj`. |
 | `word_543EEC` | `int16` | Flat registry index of global `Token.obj`. |
 
+---
+
+## 13. Minimap Generation & Cell Inspection Semantics
+
+### 13.1 Minimap Architecture and 2D Orthogonal Projection
+
+Visual analysis of scenario editor screenshots (`Research/EditorScreenshots/airfield_minimap.png`) confirmed that the Soldiers at War minimap is an orthogonal top-down 2D projection of the logical grid $0 \le X < W$ and $0 \le Y < H$:
+
+1. **Grid-to-Pixel Mapping**:
+   Each map cell $(X, Y)$ maps directly to a discrete pixel block. Unlike the 2:1 isometric diamond rendering used in the main viewport, the minimap axes are orthogonal: rectangular structures (such as aircraft hangars) align directly with horizontal and vertical minimap raster lines.
+
+2. **Surface Class Color Mapping**:
+   The engine groups surface archive names into distinct RGB color classes:
+   - **Snow** (`ssnow1`, `csnow1`, `csnow2`): Light grey / off-white `RGB(210, 215, 220)`. In winter missions where snow is present, default grass surfaces (`sgrass`) also render as snow.
+   - **Stone / Concrete / Hangars** (`sstone1`, `sstone3`, `sgen`, `cwrhouse`): Medium/dark stone grey `RGB(90, 95, 100)`.
+   - **Dirt Courtyard & Roads** (`sdirt`, `sdirt2`, `spath`, `sroad`): Mud brown `RGB(130, 90, 50)`.
+   - **Railroad Steel Tracks** (`strack2`, `lrail2`, `rrail2`): Charcoal steel `RGB(55, 55, 60)`.
+   - **Wood Decks & Flooring** (`swood1`, `swood2`, `cwood1`): Wood tan/brown `RGB(150, 110, 70)`.
+   - **Metal Plates** (`smetal1`, `lmetal1`): Slate blue/grey `RGB(115, 125, 135)`.
+   - **Foliage / Grass** (`sgrass` on summer maps): Field green `RGB(70, 120, 60)`.
+   - **Wall Outlines / Structures**: Dark boundary accent `RGB(45, 45, 50)`.
+   - **Unmapped / Void Cells**: Background dark `RGB(10, 12, 16)`.
+
+3. **Camera Viewport Diamond Frustum**:
+   The camera viewport indicator on the minimap is calculated by inverse-projecting the 4 screen corners through the isometric camera transform:
+   $$world\_sx = -camera.x + \frac{corner\_x}{zoom}, \quad world\_sy = -camera.y + \frac{corner\_y}{zoom}$$
+   $$(gx, gy) = \text{iso\_transform.screen\_to\_world\_float}(world\_sx, world\_sy, z)$$
+   Projecting these 4 vertices onto the minimap produces the characteristic white rotated diamond frustum observed in `airfield_minimap.png`.
+
+---
+
+### 13.2 Cell Inspection & 4-Slot Semantics
+
+In Soldiers at War, each cell stores 4 16-bit component words at offsets `+0`, `+2`, `+4`, `+6`:
+
+| Slot | Offset | Semantic Role | Notes & Observations |
+|---|---|---|---|
+| **Slot 0** | `+0` | **Roof / Ceiling / Upper Cut-Away** | Word 0 is dedicated to roof/ceiling tiles and upper cut-away height masks. If `sprite_frame_index >= 200` (e.g. `0xFF93` at tile `(20, 18, 0)`), this is a height mask attribute rather than a ground tile. |
+| **Slot 1** | `+2` | **Left Wall Structure** | Word 1 encodes vertical left wall segments (`lwood1`, `lmetal1`, `ldrtwall`). |
+| **Slot 2** | `+4` | **Right Wall Structure** | Word 2 encodes vertical right wall segments (`rwood1`, `rmetal1`, `rdrtwall`). |
+| **Slot 3** | `+6` | **Procedural Ground Surface / Clutter** | Word 3 is the primary procedural surface slot (e.g. `0x8182` = Group 2 `ssnow1.obj`, Frame 3). When group index $< N_{\text{surfaces}}$, it is a ground surface; otherwise it is a clutter object. |
+| **Byte 4** | `+8` | **Elevation Attribute** | Terrain elevation attribute byte ($0 \dots 255$). |
+| **DWORD 5** | `+12` | **Cell Flags & Roof Z** | Bitmask encoding roof elevation layer, LOS flags, and visibility. |
+
+---
+
+### 13.3 Primary Tile Name Resolution & Scenario Editor Parity
+
+When inspecting a cell in the Scenario Builder (as seen in `airfield_tile_20_18_0_level_0_tile_window.png` and `airfield_tile_20_18_0_level_0_tile.png`), the primary visual tile is resolved through hierarchical component priority:
+
+1. **Ground Surface Priority (Slot 3)**:
+   - Evaluated first when `word3` has `presence = 1` and `sprite_frame_index < 200`.
+   - The tileset group index maps into the `.set` surface list (e.g. index 2 in `Airfield.set` = `ssnow1`).
+   - The archive name is normalized to `<surface>.obj` (e.g. `ssnow1.obj`) with its sprite frame index (e.g. Frame 3 for tile `(20, 18, 0)`).
+2. **Roof Surface Priority (Slot 0)**:
+   - If Slot 3 is empty or clutter, but Slot 0 has a visual sprite (`presence = 1` and `sprite_frame_index < 200`), Slot 0 is identified as the primary tile.
+3. **Wall Structure Priority (Slots 1 & 2)**:
+   - If no horizontal surface exists, vertical structures (`left_wall` or `right_wall`) supply the primary tile identification.
+4. **Sidebar & HUD Exhibition Format**:
+   - The primary tile is exhibited prominently as `Tile Name: <archive>.obj (Frame <frame>)` in cyan in the sidebar, and as `[<archive>.obj:<frame>]` in the bottom HUD status bar.
+
+---
+
+### 13.4 Top-Down Raycast Picking & Selection Geometry
+
+1. **Elevation-Slicing Raycast**:
+   - In 2.5D isometric engines, cursor picking at screen position $(sx, sy)$ must not blindly evaluate against the active elevation clamp $Z_{\text{max}}$.
+   - Upper layers contain empty air cells or height masks (`sprite_frame_index >= 200`, such as `0xFF00`).
+   - The picker projects downwards through visible elevation layers $Z \in [Z_{\text{max}} \dots 0]$:
+     - At each plane $z$, calculates $(gx, gy) = \text{iso\_transform.screen\_to\_world}(world\_sx, world\_sy, z)$.
+     - Queries whether cell $(gx, gy, z)$ has active visual content (`has_visual_content()`).
+     - The first non-empty visual cell hit along the ray is selected (e.g. hitting $(20, 18, 0)$ from $Z=6$).
+     - If no elevated structures exist, the ray reaches the base ground plane ($Z=0$).
+
+2. **Inspected Tile Selection Geometry**:
+   - For any inspected cell $(hx, hy, hz)$, the exact geometric diamond tile boundaries are:
+     $$\text{Top} = (sx, sy)$$
+     $$\text{Right} = (sx + 64, sy + 32)$$
+     $$\text{Bottom} = (sx, sy + 64)$$
+     $$\text{Left} = (sx - 64, sy + 32)$$
+     where $(sx, sy) = \text{world\_to\_screen}(hx, hy, hz)$.
+   - In top-down mode, this projects to an orthogonal square of size $32 \times 32$ pixels.
+   - Rendered with a semi-transparent cyan fill (`RGBA(0, 230, 255, 45)`) and bright cyan outline (`RGBA(0, 230, 255, 240)`), dynamically anchored to the inspected tile's actual elevation layer $hz$.
+
+---
+
+### 13.5 Unified Camera Space & Minimap Frustum Projection
+
+1. **Camera Center Invariant**:
+   - The camera model defines `(-camera.x, -camera.y)` as the 2D world point $(world\_sx, world\_sy)$ positioned at the physical viewport center.
+   - In Pygame (CPU software surface, $Y$-down):
+     $$\text{center} = (\text{width}/2 + \text{camera.x} \cdot \text{zoom}, \text{height}/2 + \text{camera.y} \cdot \text{zoom})$$
+   - In Arcade (OpenGL hardware accelerated, $Y$-up):
+     $$\text{world\_camera.position} = (-\text{camera.x}, \text{camera.y})$$
+   - This alignment ensures identical panning deltas across both backends:
+     - `UP / W`: `camera.pan(0, +step)` (moves viewport North).
+     - `DOWN / S`: `camera.pan(0, -step)` (moves viewport South).
+     - `LEFT / A`: `camera.pan(+step, 0)` (moves viewport West).
+     - `RIGHT / D`: `camera.pan(-step, 0)` (moves viewport East).
+
+2. **Minimap Frustum Projection Parity**:
+   - In `calculate_viewport_polygon()`, corner offsets $(cx, cy)$ relative to screen center transform to world space:
+     - Pygame ($Y$-down): $world\_sy = -\text{camera.y} + (cy / \text{zoom})$.
+     - Arcade ($Y$-up, `invert_y=True`): $world\_sy = -\text{camera.y} - (cy / \text{zoom})$ (since screen $+cy$ in Arcade is visually Northwards).
+   - Minimap Y mapping:
+     - Pygame: $py = \text{frame\_y} + (gy / \text{map\_h}) \cdot \text{frame\_h}$.
+     - Arcade: $py = \text{frame\_y} + ((\text{map\_h} - gy) / \text{map\_h}) \cdot \text{frame\_h}$.
+   - Result: In both backends, advancing forwards ('W') moves the diamond frustum upwards towards row 0 (North) in complete visual parity with the Scenario Builder.
+
+
+
+
+
