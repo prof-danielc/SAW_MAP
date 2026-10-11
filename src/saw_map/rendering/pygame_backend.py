@@ -43,7 +43,7 @@ class PygameRenderer(IRenderer):
         self.iso_transform = IsometricTransform()
         self.top_transform = TopDownTransform()
 
-        self._surface_cache: Dict[Tuple[str, int, str], pygame.Surface] = {}
+        self._surface_cache: Dict[Tuple[str, int, str], Tuple[pygame.Surface, int, int]] = {}
         self.hovered_cell: Optional[Tuple[int, int, int]] = None
         self.width: int = 1280
         self.height: int = 720
@@ -51,7 +51,13 @@ class PygameRenderer(IRenderer):
         self.drag_start_mouse: Tuple[int, int] = (0, 0)
         self.drag_start_cam: Tuple[float, float] = (0.0, 0.0)
 
-    def initialize(self, width: int = 1280, height: int = 720, title: str = "SAW Map Visualizer (Pygame)") -> None:
+    def initialize(
+        self,
+        width: int = 1280,
+        height: int = 720,
+        title: str = "SAW Map Visualizer (Pygame)",
+        maximized: bool = False,
+    ) -> None:
         """Initializes Pygame display and window context."""
         pygame.init()
         pygame.font.init()
@@ -75,9 +81,18 @@ class PygameRenderer(IRenderer):
         self.asset_loader = asset_loader
         self.tileset = tileset
         self.palette = palette or asset_loader.load_palette("Win.pal")
+        # Center camera on map mid-point
+        mid_x = map_doc.width / 2.0
+        mid_y = map_doc.height / 2.0
+        if self.camera.perspective == ViewPerspective.ISOMETRIC:
+            sx, sy = self.iso_transform.world_to_screen(mid_x, mid_y, 0)
+        else:
+            sx, sy = self.top_transform.world_to_screen(mid_x, mid_y, 0)
+        self.camera.x = -sx
+        self.camera.y = -sy
 
-    def _get_surface(self, item: RenderItem, palette: Palette) -> Optional[pygame.Surface]:
-        """Loads and caches Pygame Surface from PIL Image."""
+    def _get_surface_data(self, item: RenderItem, palette: Palette) -> Optional[Tuple[pygame.Surface, int, int]]:
+        """Loads and caches (pygame.Surface, offset_x, offset_y) from PIL Image."""
         if not self.asset_loader:
             return None
 
@@ -88,16 +103,28 @@ class PygameRenderer(IRenderer):
             return self._surface_cache[key]
 
         if item.asset_name:
-            pil_img = self.asset_loader.get_sprite_image(
+            pil_img, ox, oy = self.asset_loader.get_sprite_image_and_offset(
                 item.asset_name, item.sprite_frame_index, palette
             )
         else:
-            pil_img = create_placeholder_sprite(item.component_type, 64, 32)
+            pil_img = create_placeholder_sprite(item.component_type, 128, 64)
+            ox, oy = 209, 322
 
         raw_bytes = pil_img.tobytes()
-        surf = pygame.image.fromstring(raw_bytes, pil_img.size, "RGBA").convert_alpha()
-        self._surface_cache[key] = surf
-        return surf
+        surf = pygame.image.fromstring(raw_bytes, pil_img.size, "RGBA")
+        if pygame.display.get_init():
+            try:
+                surf = surf.convert_alpha()
+            except pygame.error:
+                pass
+        res = (surf, ox, oy)
+        self._surface_cache[key] = res
+        return res
+
+    def _get_surface(self, item: RenderItem, palette: Palette) -> Optional[pygame.Surface]:
+        """Loads and caches Pygame Surface from PIL Image."""
+        val = self._get_surface_data(item, palette)
+        return val[0] if val else None
 
     def cycle_palette(self) -> None:
         """Cycles between daylight and ambient palettes."""
@@ -160,14 +187,23 @@ class PygameRenderer(IRenderer):
         zoom = self.camera.zoom
 
         for item in items:
-            surf = self._get_surface(item, self.palette)
-            if not surf:
+            surf_data = self._get_surface_data(item, self.palette)
+            if not surf_data:
                 continue
+
+            surf, ox, oy = surf_data
 
             if is_iso:
                 sx, sy = self.iso_transform.world_to_screen(item.grid_x, item.grid_y, item.grid_z)
+                # Apply Soldiers at War frame anchor offset relative to reference floor tile (209, 322)
+                rel_ox = ox - 209
+                rel_oy = oy - 322
+                unscaled_x = sx - 64.0 + rel_ox
+                unscaled_y = sy + rel_oy
             else:
                 sx, sy = self.top_transform.world_to_screen(item.grid_x, item.grid_y, item.grid_z)
+                unscaled_x = sx
+                unscaled_y = sy
 
             # Scale if zoom != 1.0
             sw, sh = surf.get_size()
@@ -179,8 +215,8 @@ class PygameRenderer(IRenderer):
                 draw_surf = surf
                 scaled_w, scaled_h = sw, sh
 
-            draw_x = int(center_x + (sx * zoom) - (scaled_w // 2))
-            draw_y = int(center_y + (sy * zoom) - (scaled_h // 2))
+            draw_x = int(center_x + (unscaled_x * zoom))
+            draw_y = int(center_y + (unscaled_y * zoom))
 
             # Viewport culling
             if draw_x + scaled_w < 0 or draw_x > self.width or draw_y + scaled_h < 0 or draw_y > self.height:
@@ -217,7 +253,14 @@ class PygameRenderer(IRenderer):
             hx, hy, hz = self.hovered_cell
             parts.append(f"Hover: ({hx}, {hy}, {hz})")
 
-        text_surf = self.font.render(" | ".join(parts), True, (220, 225, 230))
+        status_text = " | ".join(parts)
+        text_surf = self.font.render(status_text, True, (220, 225, 230))
+        max_w = self.width - (280 if self.camera.show_sidebar else 24)
+        if text_surf.get_width() > max_w and len(status_text) > 20:
+            while len(status_text) > 10 and text_surf.get_width() > max_w:
+                status_text = status_text[:-5]
+                text_surf = self.font.render(status_text + "...", True, (220, 225, 230))
+
         self.screen.blit(text_surf, (12, self.height - bar_h + 6))
 
     def _draw_minimap(self) -> None:
@@ -276,7 +319,16 @@ class PygameRenderer(IRenderer):
                     self.screen.blit(lbl_txt, (left + 14, y))
                     y += 18
                     if comp.is_present:
-                        asset = self.tileset.resolve_asset(comp.component_type, comp.tileset_group_index) if self.tileset else None
+                        effective_type = (
+                            self.tileset.get_component_type_for_group(comp.tileset_group_index)
+                            if self.tileset
+                            else comp.component_type
+                        )
+                        asset = (
+                            self.tileset.resolve_asset(effective_type, comp.tileset_group_index)
+                            if self.tileset
+                            else None
+                        )
                         as_txt = self.font.render(f"   Asset: {asset or 'Unresolved'}", True, (220, 220, 220))
                         self.screen.blit(as_txt, (left + 14, y))
                         y += 16
@@ -351,6 +403,11 @@ class PygameRenderer(IRenderer):
         elif key == pygame.K_3: cam.show_right_walls = not cam.show_right_walls
         elif key == pygame.K_4: cam.show_clutter = not cam.show_clutter
         elif key == pygame.K_p: self.cycle_palette()
+        elif key in (pygame.K_F11, pygame.K_f):
+            try:
+                pygame.display.toggle_fullscreen()
+            except Exception:
+                pass
         elif key == pygame.K_ESCAPE: self.running = False
 
     def close(self) -> None:

@@ -46,6 +46,9 @@ class ArcadeWindow(arcade.Window):
         super().on_resize(width, height)
         if self.renderer.world_camera:
             self.renderer.world_camera.match_window()
+        if self.renderer.gui_camera:
+            self.renderer.gui_camera.match_window()
+            self.renderer.gui_camera.position = (width / 2.0, height / 2.0)
 
     def on_draw(self) -> None:
         """Renders viewport frame."""
@@ -149,6 +152,10 @@ class ArcadeWindow(arcade.Window):
         elif symbol == arcade.key.P:
             self.renderer.cycle_palette()
 
+        # Fullscreen / Maximize toggle (F11 / F)
+        elif symbol in (arcade.key.F11, arcade.key.F):
+            self.set_fullscreen(not self.fullscreen)
+
         # Exit (Escape)
         elif symbol == arcade.key.ESCAPE:
             self.close()
@@ -160,6 +167,7 @@ class ArcadeRenderer(IRenderer):
     def __init__(self) -> None:
         self.window: Optional[ArcadeWindow] = None
         self.world_camera: Optional[arcade.camera.Camera2D] = None
+        self.gui_camera: Optional[arcade.camera.Camera2D] = None
         self.camera = Camera()
         self.map_doc: Optional[MapDocument] = None
         self.asset_loader: Optional[IAssetLoader] = None
@@ -172,7 +180,7 @@ class ArcadeRenderer(IRenderer):
         self.top_transform = TopDownTransform()
 
         self.sprite_list = arcade.SpriteList()
-        self._texture_cache: Dict[Tuple[str, int, str], arcade.Texture] = {}
+        self._texture_cache: Dict[Tuple[str, int, str], Tuple[arcade.Texture, int, int]] = {}
         self.hovered_cell: Optional[Tuple[int, int, int]] = None
         self.map_center_x: float = 0.0
         self.map_center_y: float = 0.0
@@ -181,10 +189,22 @@ class ArcadeRenderer(IRenderer):
         self._status_text_obj: Optional[arcade.Text] = None
         self._last_status_text: str = ""
 
-    def initialize(self, width: int = 1280, height: int = 720, title: str = "SAW Map Visualizer") -> None:
-        """Initializes Arcade window and Camera2D."""
+    def initialize(
+        self,
+        width: int = 1280,
+        height: int = 720,
+        title: str = "SAW Map Visualizer",
+        maximized: bool = False,
+    ) -> None:
+        """Initializes Arcade window and Camera2D viewports."""
         self.window = ArcadeWindow(width, height, title, self)
         self.world_camera = arcade.camera.Camera2D(window=self.window)
+        self.gui_camera = arcade.camera.Camera2D(window=self.window)
+        if maximized:
+            try:
+                self.window.maximize()
+            except Exception:
+                pass
 
     def _update_map_center(self) -> None:
         """Computes center of the active map in world coordinates."""
@@ -246,27 +266,32 @@ class ArcadeRenderer(IRenderer):
         is_iso = self.camera.perspective == ViewPerspective.ISOMETRIC
 
         for item in items:
-            tex = self._get_texture(item, active_pal)
-            if not tex:
+            tex_data = self._get_texture_data(item, active_pal)
+            if not tex_data:
                 continue
+
+            tex, ox, oy = tex_data
 
             # Calculate screen coordinates
             if is_iso:
                 sx, sy = self.iso_transform.world_to_screen(item.grid_x, item.grid_y, item.grid_z)
+                # Apply Soldiers at War frame anchor offset relative to reference floor tile (209, 322)
+                rel_ox = ox - 209
+                rel_oy = oy - 322
+                arcade_center_x = sx - 64.0 + rel_ox + (tex.width / 2.0)
+                arcade_center_y = -(sy + rel_oy + (tex.height / 2.0))
             else:
                 sx, sy = self.top_transform.world_to_screen(item.grid_x, item.grid_y, item.grid_z)
-
-            # Invert sy for Arcade (bottom-left origin)
-            arcade_x = sx
-            arcade_y = -sy
+                arcade_center_x = sx + (tex.width / 2.0)
+                arcade_center_y = -(sy + (tex.height / 2.0))
 
             sprite = arcade.Sprite(tex)
-            sprite.center_x = arcade_x
-            sprite.center_y = arcade_y
+            sprite.center_x = arcade_center_x
+            sprite.center_y = arcade_center_y
             self.sprite_list.append(sprite)
 
-    def _get_texture(self, item: RenderItem, palette: Palette) -> Optional[arcade.Texture]:
-        """Loads and caches arcade.Texture from Pillow image."""
+    def _get_texture_data(self, item: RenderItem, palette: Palette) -> Optional[Tuple[arcade.Texture, int, int]]:
+        """Loads and caches (arcade.Texture, offset_x, offset_y) from Pillow image."""
         if not self.asset_loader:
             return None
 
@@ -277,19 +302,26 @@ class ArcadeRenderer(IRenderer):
             return self._texture_cache[key]
 
         if item.asset_name:
-            pil_img = self.asset_loader.get_sprite_image(
+            pil_img, ox, oy = self.asset_loader.get_sprite_image_and_offset(
                 item.asset_name, item.sprite_frame_index, palette
             )
         else:
-            pil_img = create_placeholder_sprite(item.component_type, 64, 32)
+            pil_img = create_placeholder_sprite(item.component_type, 128, 64)
+            ox, oy = 209, 322
 
         try:
             tex = arcade.Texture(image=pil_img)
-            self._texture_cache[key] = tex
-            return tex
+            val = (tex, ox, oy)
+            self._texture_cache[key] = val
+            return val
         except Exception as exc:
             logger.warning(f"Error creating texture for {key}: {exc}")
             return None
+
+    def _get_texture(self, item: RenderItem, palette: Palette) -> Optional[arcade.Texture]:
+        """Loads and caches arcade.Texture from Pillow image."""
+        val = self._get_texture_data(item, palette)
+        return val[0] if val else None
 
     def cycle_palette(self) -> None:
         """Cycles between daylight and ambient palettes."""
@@ -341,8 +373,11 @@ class ArcadeRenderer(IRenderer):
         # 2. Draw world sprites hardware accelerated
         self.sprite_list.draw()
 
-        # 3. Activate default 1:1 camera for HUD & overlays
-        if self.window:
+        # 3. Activate GUI camera for HUD & overlays (1:1 pixel coords)
+        if self.gui_camera:
+            self.gui_camera.position = (win_w / 2.0, win_h / 2.0)
+            self.gui_camera.use()
+        elif self.window:
             self.window.default_camera.use()
 
         self._draw_status_bar(win_w, win_h)
@@ -375,7 +410,10 @@ class ArcadeRenderer(IRenderer):
                     if cell.right_wall.is_present: parts.append(f"RWall:{cell.right_wall.tileset_group_index}:{cell.right_wall.sprite_frame_index}")
                     if cell.clutter.is_present: parts.append(f"Clut:{cell.clutter.tileset_group_index}:{cell.clutter.sprite_frame_index}")
                     comp_info = " ".join(parts)
-                info_parts.append(f"Hover: ({hx}, {hy}, {hz}) [{comp_info}]")
+                if win_w >= 1050:
+                    info_parts.append(f"Hover: ({hx}, {hy}, {hz}) [{comp_info}]")
+                else:
+                    info_parts.append(f"Hover: ({hx}, {hy}, {hz})")
 
         status_text = " | ".join(info_parts)
         if self._status_text_obj is None:
@@ -384,6 +422,15 @@ class ArcadeRenderer(IRenderer):
         elif self._last_status_text != status_text:
             self._status_text_obj.text = status_text
             self._last_status_text = status_text
+
+        # Ensure text does not overflow screen width in compact or resized windows
+        available_w = max(50.0, float(win_w - (280 if self.camera.show_sidebar else 24)))
+        if self._status_text_obj.content_width > available_w and len(status_text) > 20:
+            shortened = status_text
+            while len(shortened) > 10 and self._status_text_obj.content_width > available_w:
+                shortened = shortened[:-5]
+                self._status_text_obj.text = shortened + "..."
+            self._last_status_text = ""
 
         self._status_text_obj.draw()
 

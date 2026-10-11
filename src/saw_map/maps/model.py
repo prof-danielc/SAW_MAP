@@ -32,12 +32,15 @@ class CellComponent:
         """Unpacks 16-bit word into presence bit, tileset group index, and frame index.
 
         Bit 15: Presence (1 = present, 0 = absent)
-        Bits 7-14: Tileset group index (0..255)
-        Bits 0-6: Sprite frame index within target archive (0..127)
+        Bits 7-14: Sprite frame index within target archive (0..255)
+        Bits 0-6: Tileset group index / object index in flat registry (0..127)
+
+        Values with frame index >= 200 (such as 0xFE00 / 0xFF93) represent height/roof
+        attributes or empty masks rather than valid sprite frames.
         """
         is_present = bool((raw_word >> 15) & 1)
-        tileset_group_index = (raw_word >> 7) & 0xFF
-        sprite_frame_index = raw_word & 0x7F
+        tileset_group_index = raw_word & 0x7F
+        sprite_frame_index = (raw_word >> 7) & 0xFF
         return cls(
             component_type=comp_type,
             is_present=is_present,
@@ -45,6 +48,12 @@ class CellComponent:
             sprite_frame_index=sprite_frame_index,
             raw_word=raw_word,
         )
+
+
+GLOBAL_CLUTTER: List[str] = [
+    "People", "Can", "Turret", "Token", "Specials", "Cgendam",
+    "Newtree1", "Newtree2", "Newtree3", "Newtree4", "Newtree5", "Newtree6", "Newtree7",
+]
 
 
 @dataclass(slots=True)
@@ -91,22 +100,82 @@ class TilesetDefinition:
     right_walls: List[str] = field(default_factory=list)
     clutter: List[str] = field(default_factory=list)
 
-    def resolve_asset(self, comp_type: ComponentType, group_idx: int) -> Optional[str]:
-        """Resolves target .obj archive name given component type and group index."""
-        target_list: List[str]
-        if comp_type == ComponentType.FLOOR:
-            target_list = self.surfaces
-        elif comp_type == ComponentType.LEFT_WALL:
-            target_list = self.left_walls
-        elif comp_type == ComponentType.RIGHT_WALL:
-            target_list = self.right_walls
-        elif comp_type == ComponentType.CLUTTER:
-            target_list = self.clutter
+    def get_all_assets(self) -> List[str]:
+        """Returns the flat registry of assets (surfaces + left_walls + right_walls + clutter + GLOBAL_CLUTTER)."""
+        return self.surfaces + self.left_walls + self.right_walls + self.clutter + GLOBAL_CLUTTER
+
+    def get_component_type_for_group(self, group_idx: int) -> ComponentType:
+        """Determines the component category from the flat registry group index."""
+        num_surf = len(self.surfaces)
+        num_lwall = len(self.left_walls)
+        num_rwall = len(self.right_walls)
+        if group_idx < num_surf:
+            return ComponentType.FLOOR
+        elif group_idx < num_surf + num_lwall:
+            return ComponentType.LEFT_WALL
+        elif group_idx < num_surf + num_lwall + num_rwall:
+            return ComponentType.RIGHT_WALL
         else:
+            return ComponentType.CLUTTER
+
+    def resolve_flat_asset(self, group_idx: int) -> Optional[str]:
+        """Resolves target .obj archive name by flat index in registry (0..N)."""
+        all_assets = self.get_all_assets()
+        if 0 <= group_idx < len(all_assets):
+            asset = all_assets[group_idx]
+            # In winter maps where ssnow1 is present, default surface 0 (sgrass) renders as ssnow1
+            if group_idx == 0 and asset == "sgrass" and "ssnow1" in self.surfaces:
+                return "ssnow1"
+            return asset
+        return None
+
+    def resolve_asset(self, comp_type: ComponentType, group_idx: int) -> Optional[str]:
+        """Resolves target .obj archive name given component type and group index.
+
+        Supports flat registry indexing as well as partitioned category indexing.
+        """
+        # Check partitioned resolution
+        if comp_type == ComponentType.FLOOR:
+            if 0 <= group_idx < len(self.surfaces):
+                asset = self.surfaces[group_idx]
+                if group_idx == 0 and asset == "sgrass" and "ssnow1" in self.surfaces:
+                    return "ssnow1"
+                return asset
+            return None
+        elif comp_type == ComponentType.LEFT_WALL:
+            if 0 <= group_idx < len(self.left_walls):
+                return self.left_walls[group_idx]
+            num_surf = len(self.surfaces)
+            rel_idx = group_idx - num_surf
+            if 0 <= rel_idx < len(self.left_walls):
+                return self.left_walls[rel_idx]
+            return None
+        elif comp_type == ComponentType.RIGHT_WALL:
+            if 0 <= group_idx < len(self.right_walls):
+                return self.right_walls[group_idx]
+            num_surf = len(self.surfaces)
+            num_lwall = len(self.left_walls)
+            rel_idx = group_idx - num_surf - num_lwall
+            if 0 <= rel_idx < len(self.right_walls):
+                return self.right_walls[rel_idx]
+            return None
+        elif comp_type == ComponentType.CLUTTER:
+            if 0 <= group_idx < len(self.clutter):
+                return self.clutter[group_idx]
+            global_offset = group_idx - len(self.clutter)
+            if 0 <= global_offset < len(GLOBAL_CLUTTER):
+                return GLOBAL_CLUTTER[global_offset]
+            num_surf = len(self.surfaces)
+            num_lwall = len(self.left_walls)
+            num_rwall = len(self.right_walls)
+            rel_idx = group_idx - num_surf - num_lwall - num_rwall
+            if 0 <= rel_idx < len(self.clutter):
+                return self.clutter[rel_idx]
+            rel_global = rel_idx - len(self.clutter)
+            if 0 <= rel_global < len(GLOBAL_CLUTTER):
+                return GLOBAL_CLUTTER[rel_global]
             return None
 
-        if 0 <= group_idx < len(target_list):
-            return target_list[group_idx]
         return None
 
 

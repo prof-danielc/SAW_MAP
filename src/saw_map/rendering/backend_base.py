@@ -19,7 +19,7 @@ class IRenderer(ABC):
     """Abstract interface for graphical viewport rendering engines."""
 
     @abstractmethod
-    def initialize(self, width: int, height: int, title: str) -> None:
+    def initialize(self, width: int, height: int, title: str, maximized: bool = False) -> None:
         """Initializes the window display and graphics context."""
         ...
 

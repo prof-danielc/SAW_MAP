@@ -27,7 +27,7 @@ def test_picking_center_at_origin_layer_0():
 
 
 def test_picking_center_with_elevation_layer_6():
-    """Validates that on layer 6 (offset -96 px), screen center maps to (3, 3, 6)."""
+    """Validates that on layer 6 (offset -288 px), screen center maps to (4, 4, 6)."""
     inspector = CellInspector()
     cam = Camera(x=0.0, y=0.0, zoom=1.0, active_max_layer=6)
     doc = make_dummy_document()
@@ -36,7 +36,7 @@ def test_picking_center_with_elevation_layer_6():
     win_h = 720.0
     picked = inspector.pick_cell(win_w / 2.0, win_h / 2.0, win_w, win_h, cam, doc)
     assert picked is not None
-    assert picked == (3, 3, 6)
+    assert picked == (4, 4, 6)
 
 
 def test_picking_with_pan_offset():
@@ -49,7 +49,7 @@ def test_picking_with_pan_offset():
     win_h = 720.0
     picked = inspector.pick_cell(win_w / 2.0, win_h / 2.0, win_w, win_h, cam, doc)
     assert picked is not None
-    assert picked == (2, 0, 0)
+    assert picked == (1, 0, 0)
 
 
 def test_picking_with_zoom():

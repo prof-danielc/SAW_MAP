@@ -28,16 +28,16 @@ class IsometricTransform(IGeometryTransformer):
     """Dimetric 2:1 isometric coordinate transformation.
 
     Tile Dimensions:
-        tile_width: Horizontal diamond span (default: 64 px)
-        tile_height: Vertical diamond span (default: 32 px)
-        elevation_step: Vertical displacement per elevation layer Z (default: 16 px)
+        tile_width: Horizontal diamond span (engine standard: 128 px)
+        tile_height: Vertical diamond span (engine standard: 64 px)
+        elevation_step: Vertical displacement per elevation layer Z (engine standard: 48 px)
     """
 
     def __init__(
         self,
-        tile_width: float = 64.0,
-        tile_height: float = 32.0,
-        elevation_step: float = 16.0,
+        tile_width: float = 128.0,
+        tile_height: float = 64.0,
+        elevation_step: float = 48.0,
     ) -> None:
         if tile_width <= 0 or tile_height <= 0:
             raise ValueError("Tile dimensions must be positive.")

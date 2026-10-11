@@ -45,6 +45,13 @@ class IAssetLoader(ABC):
         """Retrieves or decodes a sprite frame as a true-color RGBA Pillow image."""
         ...
 
+    @abstractmethod
+    def get_sprite_image_and_offset(
+        self, asset_name: str, frame_index: int, palette: Palette
+    ) -> Tuple[Image.Image, int, int]:
+        """Retrieves or decodes a sprite frame as RGBA Pillow image along with (offset_x, offset_y)."""
+        ...
+
 
 class AssetLoader(IAssetLoader):
     """Concrete implementation of IAssetLoader with two-tier in-memory caching."""
@@ -162,26 +169,36 @@ class AssetLoader(IAssetLoader):
             self._archive_cache[clean_name] = None
             return None
 
-    def get_sprite_image(self, asset_name: str, frame_index: int, palette: Palette) -> Image.Image:
-        """Retrieves cached RGBA PIL image for sprite frame or creates placeholder if missing."""
+    def get_sprite_image_and_offset(
+        self, asset_name: str, frame_index: int, palette: Palette
+    ) -> Tuple[Image.Image, int, int]:
+        """Retrieves cached RGBA PIL image and (offset_x, offset_y) for sprite frame."""
         clean_name = Path(asset_name).stem.lower()
         cache_key = (clean_name, frame_index, palette.name)
-
-        if cache_key in self._rgba_cache:
-            return self._rgba_cache[cache_key]
 
         archive = self.get_sprite_archive(clean_name)
         if archive:
             frame = archive.get_frame(frame_index)
             if frame:
-                img = frame.to_rgba(palette)
-                self._rgba_cache[cache_key] = img
-                return img
+                if cache_key in self._rgba_cache:
+                    img = self._rgba_cache[cache_key]
+                else:
+                    img = frame.to_rgba(palette)
+                    self._rgba_cache[cache_key] = img
+                return img, frame.offset_x, frame.offset_y
 
         # Fallback placeholder image
-        placeholder = self._create_placeholder(clean_name, frame_index)
-        self._rgba_cache[cache_key] = placeholder
-        return placeholder
+        if cache_key in self._rgba_cache:
+            placeholder = self._rgba_cache[cache_key]
+        else:
+            placeholder = self._create_placeholder(clean_name, frame_index)
+            self._rgba_cache[cache_key] = placeholder
+        return placeholder, 209, 322
+
+    def get_sprite_image(self, asset_name: str, frame_index: int, palette: Palette) -> Image.Image:
+        """Retrieves cached RGBA PIL image for sprite frame or creates placeholder if missing."""
+        img, _, _ = self.get_sprite_image_and_offset(asset_name, frame_index, palette)
+        return img
 
     @staticmethod
     def _create_placeholder(label: str, frame_idx: int) -> Image.Image:

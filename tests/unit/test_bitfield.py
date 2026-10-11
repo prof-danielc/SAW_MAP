@@ -7,22 +7,22 @@ from saw_map.maps.model import CellComponent, ComponentType, MapCell, MapDocumen
 def test_bitmask_unpacking_present_component():
     """Validates bitmask extraction when bit 15 is set.
 
-    Example word: 0x8285
-    Binary: 1 00000101 0000101 -> bit 15 = 1, group = 5, frame = 5
+    Example word: 0x8182 (airfield tile at 20, 18, 0)
+    Binary: 1 00000011 0000010 -> bit 15 = 1, frame = 3, group = 2 (ssnow1)
     """
-    raw_word = (1 << 15) | (5 << 7) | 5
+    raw_word = (1 << 15) | (3 << 7) | 2
     comp = CellComponent.from_raw_word(ComponentType.FLOOR, raw_word)
 
     assert comp.is_present is True
-    assert comp.tileset_group_index == 5
-    assert comp.sprite_frame_index == 5
+    assert comp.tileset_group_index == 2
+    assert comp.sprite_frame_index == 3
     assert comp.raw_word == raw_word
     assert comp.component_type == ComponentType.FLOOR
 
 
 def test_bitmask_unpacking_absent_component():
     """Validates bitmask extraction when bit 15 is 0."""
-    raw_word = (0 << 15) | (12 << 7) | 3
+    raw_word = (0 << 15) | (3 << 7) | 12
     comp = CellComponent.from_raw_word(ComponentType.LEFT_WALL, raw_word)
 
     assert comp.is_present is False
@@ -31,13 +31,13 @@ def test_bitmask_unpacking_absent_component():
 
 
 def test_bitmask_boundary_values():
-    """Validates maximum allowed values for group (8 bits = 255) and frame (7 bits = 127)."""
+    """Validates maximum allowed values for group (7 bits = 127) and frame (8 bits = 255)."""
     raw_word = (1 << 15) | (255 << 7) | 127
     comp = CellComponent.from_raw_word(ComponentType.CLUTTER, raw_word)
 
     assert comp.is_present is True
-    assert comp.tileset_group_index == 255
-    assert comp.sprite_frame_index == 127
+    assert comp.tileset_group_index == 127
+    assert comp.sprite_frame_index == 255
 
     # Zero word
     comp_zero = CellComponent.from_raw_word(ComponentType.RIGHT_WALL, 0)
@@ -112,3 +112,54 @@ def test_map_document_validation():
     # Invalid layer count
     with pytest.raises(ValueError, match="layer_count 5 must equal 7"):
         MapDocument(title="Bad", version="21", width=50, height=50, layer_count=5)
+
+
+def test_floor_empty_and_surface_unpacking():
+    """Validates reverse-engineered floor word conventions (0x0000 = empty; 0xFFxx = surface with variations)."""
+    # 0x0000 is empty
+    comp_zero = CellComponent.from_raw_word(ComponentType.FLOOR, 0x0000)
+    assert comp_zero.is_present is False
+
+    # 0x8182: present, group=2 (ssnow1), frame=3
+    comp_target = CellComponent.from_raw_word(ComponentType.FLOOR, 0x8182)
+    assert comp_target.is_present is True
+    assert comp_target.tileset_group_index == 2
+    assert comp_target.sprite_frame_index == 3
+
+    # 0xFF93: present, group=19, frame=255
+    comp_mask = CellComponent.from_raw_word(ComponentType.FLOOR, 0xFF93)
+    assert comp_mask.is_present is True
+    assert comp_mask.tileset_group_index == 19
+    assert comp_mask.sprite_frame_index == 255
+
+
+def test_tileset_global_clutter_and_winter_snow_resolution():
+    """Validates winter snow replacement on surface 0 and GLOBAL_CLUTTER resolution."""
+    ts = TilesetDefinition(
+        name="Airfield",
+        surfaces=["sgrass", "shill", "ssnow1", "sdirt"],
+        left_walls=["lwood1"],
+        right_walls=["rwood1"],
+        clutter=["snwtree1", "crock4"],
+    )
+
+    # In winter tileset containing ssnow1, surface 0 (sgrass) resolves to ssnow1
+    assert ts.resolve_asset(ComponentType.FLOOR, 0) == "ssnow1"
+    assert ts.resolve_asset(ComponentType.FLOOR, 1) == "shill"
+    assert ts.resolve_asset(ComponentType.FLOOR, 2) == "ssnow1"
+    assert ts.resolve_asset(ComponentType.FLOOR, 3) == "sdirt"
+
+    # Clutter from tileset
+    assert ts.resolve_asset(ComponentType.CLUTTER, 0) == "snwtree1"
+    assert ts.resolve_asset(ComponentType.CLUTTER, 1) == "crock4"
+
+    # Global clutter extension (group_idx >= 2)
+    assert ts.resolve_asset(ComponentType.CLUTTER, 2) == "People"
+    assert ts.resolve_asset(ComponentType.CLUTTER, 3) == "Can"
+    assert ts.resolve_asset(ComponentType.CLUTTER, 4) == "Turret"
+    assert ts.resolve_asset(ComponentType.CLUTTER, 5) == "Token"
+    assert ts.resolve_asset(ComponentType.CLUTTER, 6) == "Specials"
+    assert ts.resolve_asset(ComponentType.CLUTTER, 7) == "Cgendam"
+    assert ts.resolve_asset(ComponentType.CLUTTER, 8) == "Newtree1"
+
+

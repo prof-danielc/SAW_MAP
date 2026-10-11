@@ -20,6 +20,7 @@ def test_cli_help():
     result = run_cli("--help")
     assert result.returncode == 0
     assert "MAP_FILE" in result.stdout or "MAP_FILE" in result.stderr or "usage:" in result.stdout.lower()
+    assert "--maximize" in result.stdout
 
 
 def test_cli_missing_positional_map_file():

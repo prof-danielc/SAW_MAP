@@ -86,6 +86,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         choices=["arcade", "pygame"],
         help="Rendering backend: arcade (default) or pygame",
     )
+    parser.add_argument(
+        "--maximize",
+        action="store_true",
+        default=False,
+        help="Start window in maximized mode",
+    )
     return parser
 
 
@@ -187,6 +193,8 @@ def main(args: Optional[List[str]] = None) -> int:
 
     title = f"Soldiers at War Map Visualizer - {map_doc.title}"
     try:
+        renderer.initialize(1280, 720, title, maximized=parsed.maximize)
+    except TypeError:
         renderer.initialize(1280, 720, title)
     except Exception as exc:
         logger.error(f"Renderer initialization error: {exc}")

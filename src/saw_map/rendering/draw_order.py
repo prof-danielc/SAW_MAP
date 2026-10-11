@@ -81,7 +81,7 @@ class DrawOrderStrategy:
             if cell.is_empty():
                 continue
 
-            for comp_type, comp in (
+            for declared_type, comp in (
                 (ComponentType.FLOOR, cell.floor),
                 (ComponentType.LEFT_WALL, cell.left_wall),
                 (ComponentType.RIGHT_WALL, cell.right_wall),
@@ -89,20 +89,34 @@ class DrawOrderStrategy:
             ):
                 if not comp.is_present:
                     continue
-                if not type_visibility[comp_type]:
+
+                # Filter out boundary / roof mask frames (>= 200)
+                if comp.sprite_frame_index >= 200:
+                    continue
+
+                # Determine effective component type based on tileset registry if available
+                effective_type = (
+                    tileset.get_component_type_for_group(comp.tileset_group_index)
+                    if tileset
+                    else declared_type
+                )
+
+                if not type_visibility[effective_type]:
                     continue
 
                 asset_name: Optional[str] = None
                 if tileset:
-                    asset_name = tileset.resolve_asset(comp_type, comp.tileset_group_index)
+                    asset_name = tileset.resolve_asset(effective_type, comp.tileset_group_index)
+                    if asset_name is None:
+                        continue
 
-                sort_key = cls.get_sort_key(z, x, y, comp_type)
+                sort_key = cls.get_sort_key(z, x, y, effective_type)
                 items.append(
                     RenderItem(
                         grid_x=x,
                         grid_y=y,
                         grid_z=z,
-                        component_type=comp_type,
+                        component_type=effective_type,
                         component=comp,
                         asset_name=asset_name,
                         sprite_frame_index=comp.sprite_frame_index,

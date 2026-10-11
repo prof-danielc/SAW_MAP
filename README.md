@@ -81,6 +81,7 @@ python -m saw_map.main "Research/SSI/Soldiers at War/Single_g/Airfield.map" --ga
 | `--layer` | `-l` | `6` | Initial maximum visible elevation layer (`0`..`6`). |
 | `--view` | `-v` | `isometric` | Initial view perspective: `isometric` or `top-down`. |
 | `--diagnostics` | `-d` | `False` | Enable verbose reverse-engineering inspection output. |
+| `--maximize` | — | `False` | Start visualizer window in maximized mode. |
 | `--log-level` | — | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
 | `--help` | `-h` | — | Show help message and exit. |
 
@@ -120,6 +121,7 @@ The visualizer provides a unified set of controls across both the Arcade and Pyg
 | <kbd>M</kbd> | **Toggle Minimap** | Show or hide picture-in-picture minimap overlay |
 | <kbd>I</kbd> | **Toggle Inspector** | Show or hide tile property sidebar |
 | <kbd>P</kbd> | **Cycle Palette** | Switch between daylight (`Win.pal`) and night/ambient (`Darkpal.col`) |
+| <kbd>F11</kbd> / <kbd>F</kbd> | **Toggle Fullscreen / Maximize** | Toggle window between fullscreen and normal windowed mode |
 | **Left Mouse Click** | **Inspect Tile** | Select tile under cursor to inspect its layers and components in sidebar |
 | <kbd>Esc</kbd> | **Exit** | Close the application |
 
