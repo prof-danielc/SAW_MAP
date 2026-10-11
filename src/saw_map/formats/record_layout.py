@@ -281,7 +281,12 @@ def _build_v21_layout() -> Tuple[TableLayout, ...]:
                     "0 -> 1 is the only soldier-record change between Airfield.map and a copy saved after "
                     "ticking 'Field Medic' for Character ID 9",
                 ),
-                _u16("field_m306"),
+                _u16(
+                    "field_m306",
+                    _UNKNOWN,
+                    "a separate 16-bit field (read and written on its own, nine fields before the portrait); "
+                    "0xFFFF everywhere except 15 soldiers of the Airfield maps, which hold 0",
+                ),
                 _u16(
                     "primary_training",
                     _CONFIRMED,

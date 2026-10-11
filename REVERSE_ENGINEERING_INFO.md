@@ -314,15 +314,16 @@ placement handler (lines 39380–39800) and the mode-name switch (lines 79854–
 | Bits | Meaning | Engine draw | Status |
 |---|---|---|---|
 | 0 | **Mission Exit** cell (editor mode 12) | `Token.obj` frame 6 (blue diamond outline) | Confirmed (mode 12 sets `|= 1`; cells line the map edge in `airfield_information_token.png`) |
-| 1 | Unknown | Extra call `sub_43CCF8` after the floor | Unknown |
+| 1 | Unknown | Extra call `sub_43CCF8` after the floor | Unknown; never set in a shipped map |
 | 4 | **Item / Canister** present (editor modes 9 and 18) | `Can.obj` frame = bits 12–17; the Canister dialog offers "American / German / Generic Dead Body" or "Canister" as the appearance | Confirmed (901 cells in 95 maps, every frame valid; `(76, 14, 0)` in `airfield_ammo.png`, `(35, 25, 0)` in `airfield_objective_2.png`) |
 | 5 | **Character** on the cell, or a character's alternate cell (editor modes 5, 6, 7) | `People.obj` frame from the soldier table, or the dice `Token.obj` frame 11 on an alternate cell (§9.2) | Confirmed (every soldier cell and every alternate cell carries it) |
+| 6 | **Turret** standing on the cell | none (the turret sprites come from the turret group table, §9.2) | Confirmed: the placement routine sets `|= 0x40` on the 3 × 3 cells of a new turret (line 40299), and in the 95 maps the 540 cells with the bit are exactly the cells of the 60 turret groups whose state is 0 |
 | 7 | **Information token** on the cell (editor mode 10, "Info") | `Token.obj` frame 5 (orange folder) | Confirmed (cells equal the information token table cells in all 95 maps) |
 | 8 | Alternate draw | Walls and clutter drawn through `sub_4447D5` instead of `sub_451610` | Unknown purpose |
 | 9 | **Land Mine** (editor mode 11) | `Token.obj` frame 4, raised 24 px on some floor types | Confirmed (mode 11 sets `|= 0x200`) |
 | 10 | **Reinforcement token** on the cell (editor modes 14–16) | `Token.obj` frame from the token table (§9.2) | Confirmed (cells equal the token table cells in all 95 maps) |
 | 12–17 | `Can.obj` frame of the ground object | used with bit 4 | Confirmed |
-| 16–17 | Unknown | set in every cell | Unknown |
+| 16–17 | Unknown | set in nearly every cell | Unknown |
 | 18–20 | Floor cover level | see above | Confirmed rule |
 | 23 | **Lockable** (editor mode 23) | `Token.obj` frame 12 (padlock) | Confirmed |
 | 24–26 | **Multiplayer** marker $n$ = 1–4 (editor modes 25–28) | `Token.obj` frame $n - 1$ (soldier icons 1–4) | Confirmed; presumably the start cells of players 1–4 |
@@ -618,7 +619,7 @@ decompilation and then checked against all 95 version 21 maps.
   | `+300` field medic | 0 / 0 / 0 / 0 | The "Field Medic" checkbox: 0 or 1 | Confirmed by a controlled edit (see below) |
   | `+796` facing | 4 / 3 / 5 / 5 | Screen direction, clockwise from north: 0 N, 1 NE, 2 E, 3 SE, 4 S, 5 SW, 6 W, 7 NW (north = up, south = bottom of the screen) | Confirmed: IDs 9, 10, 39 face S, SE, SW in the editor |
   | `+12` appearance | 12 / 11 / 11 / 11 | Body type 0–20. Usage in the 95 maps: 0–7 American, 8–12 German, 13 Italian (all 102 soldiers of nationality 16), 14 French, 15 male civilian, 16 female civilian (Neutral and French), 17–20 rare | Confirmed by the frame formula below; 15 and 16 confirmed by the civilians edit |
-  | `+306` | — | `0xFFFF` in 1,822 of 1,853 soldiers, 0 otherwise | Unknown |
+  | `+306` | — | A 16-bit field of its own, not the low half of a 32-bit value with `+308`: the loader and the saver handle the two offsets in separate 2-byte calls, nine fields apart in the stream (lines 41900 / 41909 and 41666 / 41675), `+308` has its own 16-bit accessors (`word_847F84`, lines 78312–78320), and a combined value would be meaningless (low word `0xFFFF`). It is `0xFFFF` in every soldier of every map except the Airfield maps, where 15 soldiers hold 0; a soldier replaced in the editor went from 0 to `0xFFFF`. Probably an optional reference with `0xFFFF` = none | Unknown |
   | `+308` portrait | 82 / 72 / 73 / 80 | Portrait number; the picture is `Portrait.obj` frame $3 \times \text{portrait}$. `0xFFFF` = none (characters newly created with the editor) | Confirmed (see below) |
   | `+326` (192 words) | — | Loadout: indices into the item table | Confirmed (all 27,813 non-empty words in 95 maps reference an in-use item slot) |
 
@@ -877,36 +878,98 @@ clicking an existing object in it opens that object's dialog.
 
 ## 11. Open Research Questions & Future Reverse-Engineering Targets
 
-1. **Cell Flag Bits (`dword5`)**:
-   Bits 1, 8, 16–17 and the area effect marker on bits 28–30 (§3.7); any line-of-sight or
-   movement flags.
-2. **Black-Out Mask (`byte4`)**:
-   What the eight bits of the mask stand for, and how the game reveals blacked-out cells.
-3. **Soldier Records (`T-847E50`)**:
-   The remaining scalar `+306`; when the highlighted and darkened portrait frames are used; how
-   the game picks between a soldier's position
-   and its alternate cell, and the role of the appearance percentage. Further controlled edits
-   in the Scenario Builder (change one value, save under a new name, diff) are the quickest way
-   to settle these.
-4. **Unidentified Tables**:
-   `T-558FE8`, `T-550328`, `T-8923C0`, `T-559530`, the second soldier array, and the mission
-   parameter blocks (victory conditions, weather, and start time are expected there).
-5. **Information Tokens, Items, and Reinforcements**:
-   The always-zero word of `T-554A80` and confirmation of the radius; the names behind item
-   class and kind, and the last field of the item record; the character type lists of American
-   and Neutral reinforcement tokens.
-6. **Turret Group State**:
-   What a non-zero state means (inactive, destroyed, or scripted) and when it changes.
-7. **Version 19 / 20 Streams**:
-   Which post-tile fields differ from version 21 (20-byte size difference for version 19).
-8. **Playable Window Globals**:
-   The code that copies the stored window (§9.3) into `word_550318` / `word_55031C`.
-9. **Alternate Draw Routine `sub_4447D5`**:
-   Used for walls and clutter when `dword5` bit 8 is set.
-10. **Sound & Ambience Triggers**:
-    Mapping of sound effect identifiers triggered by ambient clutter objects and door interactions.
-11. **Mini-map Format (`minimap.col` / `Data/minimap.col`)**:
-    Decompression and packing of pre-baked minimap overhead thumbnails.
+This section is the register of everything in the map format that is still unknown or only a
+hypothesis. Status values: **Unknown** (no proposed meaning), **Hypothesis** (a proposed meaning
+that is not yet confirmed), **Partial** (part of the field is confirmed). The "Next step" column
+names the cheapest way to settle the entry; a *controlled edit* means changing one value in the
+Scenario Builder, saving under a new name, and comparing the decompressed streams.
+
+### 11.1 Header (§2.2)
+
+| Unknown | What is known | Status | Next step |
+|---|---|---|---|
+| Editor state words at `0x90`, `0x92` (`word_8AECB6`, `word_8AECB8`) | Airfield holds 51 and 47, one more than the cursor X and Y | Unknown | Controlled edit: save with the cursor elsewhere |
+| Five of the six words at `0x9C` | Only the last one (`word_8AECD6`, brush sprite frame) is identified | Unknown | Trace the readers of `0x8AECCC`–`0x8AECD4` |
+| `0xA9` (`0x8AECDA`), `0xAD` (`dword_8AECF0`), `0xB1` (`dword_8AECF4`) | Read and written with the rest of the editor state | Unknown | Trace their readers |
+| `0xBC`, `0xBE`, `0xC0` (`word_543E60`, `word_543E64`, `byte_543E68`) | The three reads that an earlier revision overlooked | Unknown | Trace their readers |
+| Version 20 header | The engine accepts it; no sample exists | Unknown | None without a sample |
+
+### 11.2 Cell Data (§3)
+
+| Unknown | What is known | Status | Next step |
+|---|---|---|---|
+| Flag bit 1 | Triggers the extra call `sub_43CCF8` after the floor is drawn; never set in any of the 96 shipped maps | Unknown (probably a run-time flag) | Decompile `sub_43CCF8` |
+| Flag bit 8 | Walls and clutter are drawn through `sub_4447D5` instead of `sub_451610`; set in 101 cells | Unknown purpose | Decompile `sub_4447D5`; look at the 101 cells |
+| Flag bits 16–17 | Set in all but about 880 of the 8,736,000 cells of the 96 maps | Unknown | Look at the cells where they are clear; find the code that clears them |
+| Flag bits 28–30 (area effect) | Draw `Token.obj` frame $n + 12$ (fire, smoke, cloud); only the value 5 occurs (5,080 cells) | Draw confirmed; game purpose unknown | Find the editor mode that sets them |
+| Flag bits 2, 3, 11, 21, 22, 27 | Never set in any of the 96 shipped maps | Presumed unused or run-time only | None needed |
+| Line-of-sight and movement flags | None identified; they may be derived from the tile sprites rather than stored | Unknown | Trace the path-finding and visibility routines |
+| Black-out mask (`byte4`) | Only `0xFF` and `0x00` occur; set by editor mode 21 | Meaning of the eight bits and the reveal rule unknown | Controlled edit with the Black Out mode; trace the readers |
+
+### 11.3 Soldier Records (`T-847E50`, §9.2)
+
+| Unknown | What is known | Status | Next step |
+|---|---|---|---|
+| `+306` | A 16-bit field of its own; `0xFFFF` everywhere except 15 Airfield soldiers (IDs 1, 3, 7, 11, 13, 15, 21, 23, 27, 29, 31, 33, 35, 37, 39), which hold 0 | Unknown | Compare what the editor shows for ID 23 (0) and ID 9 (`0xFFFF`) |
+| `+0`, `+4`, `+8` | Three 32-bit fields at the start of the record | Unknown | Tabulate their values over all maps |
+| `+724` encumbrance | 30 for the one dialog value seen; range 17–32 | Hypothesis | Controlled edit of the Encumbrance value |
+| Nationality codes 8 and 16 | Assigned to French and Italian by list order; supported by the body types they use | Hypothesis | Controlled edit: create a French and an Italian character |
+| AI indices 0, 2, 3, 4 (Follower, Hider, Mach Gunner, Medic) | Assigned by list order; Guard, Seeker, Stationary, and Wander are confirmed, Hider by the civilians edit | Partial | Controlled edit per value |
+| Appearances 17–20 | Rare; no body type identified | Unknown | View `People.obj` frames 136–167 |
+| Frame formula exceptions | 21 of 1,852 soldiers do not satisfy $8 \times \text{appearance} + (\text{facing} + 4) \bmod 8$ | Presumed inconsistent edits | List the 21 records and their maps |
+| Position versus alternate cell | 13 Airfield soldiers have an alternate cell (the dice) | Selection rule unknown | Trace the mission start code |
+| First soldier array (percentage) | Shown as "Percentage" in Character Stats (100 for ID 23) | Role in game unknown | Trace its readers; probably the chance that the character appears |
+| Second soldier array (0 / 1) | Changed from 1 to 0 when two player soldiers were replaced | Hypothesis: marks player-squad members | Compare with the controller field over all maps |
+| Highlighted and darkened portrait frames ($3p + 1$, $3p + 2$) | Exist for portraits 0–67 only | Use unknown | Trace the readers of `Portrait.obj` |
+
+### 11.4 Information Tokens, Reinforcements, and Items (§9.2)
+
+| Unknown | What is known | Status | Next step |
+|---|---|---|---|
+| Information token `radius` | 0 for token 3, as in its dialog; range 0–32 | Hypothesis | Controlled edit of the Token Radius |
+| Information token word 3 | Always 0 | Unknown | Trace the dialog code |
+| Reinforcement word 8 | Always 0 | Unknown | Trace the dialog code |
+| Reinforcement character type lists | German list known (5 entries); American tokens use 0–7, Neutral tokens 0–1 | Partial | Read the two dropdown lists in the editor |
+| Entry conditions 2 and 3 (Target Destination, Sighted) | Never used in the shipped maps; assigned by list order | Hypothesis | Controlled edit |
+| Causes value 1 (Immediate Victory) | Never used in the shipped maps; assigned by list order | Hypothesis | Controlled edit |
+| Item `item_class` (1–5) and `item_kind` | No name table matched; the loader special-cases class 1 | Hypothesis | Match against the game's item tables; controlled edit of a canister's contents |
+| Item record last field (`u32`) | Not a position | Unknown | Tabulate by class and kind; ammunition count is a candidate |
+| Item record words 2 and 5 | Always `0xFFFF` | Unknown | Trace the item code |
+| Items missing from loadouts | 17 of 10,546 soldier-held items are not in their holder's loadout | Unknown | List the 17 records |
+| Canisters without items | 17 of 902 canisters hold nothing | Presumed empty containers | None needed |
+
+### 11.5 Unidentified Tables (§9.1)
+
+| Unknown | What is known | Status | Next step |
+|---|---|---|---|
+| `T-558FE8` | 8 × 8 bytes | Unknown | Trace the readers of the global |
+| `T-550328` | 8 × 8 bytes | Unknown | Trace the readers of the global |
+| `T-8923C0` | 100 × 6 bytes (`3 × u16`) | Unknown | Trace the readers of the global |
+| `T-559530` | 8 × 32 bytes | Unknown | Trace the readers of the global |
+| Mission parameter blocks `S-884750A`–`E` | Five blocks of 16, 8 × 8, 16, 8 × 12, and 6 bytes | Unknown; victory conditions, weather, and start time are expected there | Controlled edit of the mission settings dialog |
+| `S-884828` | `u16 x, u16 y, u16`; became the last clicked cell in both controlled edits | Hypothesis: editor selection | Third word still unknown |
+| Turret group state | A non-zero state hides the turret, and its cells do not carry flag bit 6 (§3.7), so the turret is absent rather than destroyed. 141 of the 201 groups in the 95 maps are in that state, including Airfield's only group | Why absent groups stay in the table is unknown (deleted in the editor, or enabled by a script) | Controlled edit: place and delete a turret |
+| Turret group parts 10–20 | 9 of 20 part slots are used | Unknown | None needed unless a larger turret exists |
+
+### 11.6 Other Files and Versions
+
+| Unknown | What is known | Status | Next step |
+|---|---|---|---|
+| Version 19 post-tile layout | `Menu/Demo.MAP` has 20 bytes fewer than version 21 | Unknown (task T035 of feature 002, deferred) | Transcribe the older reader in `sub_445F25` |
+| Version 20 post-tile layout | No sample | Unknown | None without a sample |
+| Mission `.txt` line 49 | A number that changes on every save (`15839`, `18275`, `16419` for three saves of Airfield) | Hypothesis: checksum or save stamp | Find the writer in the save routine |
+| Mission `.txt` lines 43–46 | `<index> : <status>` | Meaning of the four states unknown | Controlled edit of the objectives |
+| Playable window globals | The stored window (§9.3) equals the centred `.txt` dimensions | The code that copies it into `word_550318` / `word_55031C` is not located | Trace the writers of the two globals |
+| Scenario Builder modes 8, 20, 24 | Absent from the mode-name switch; mode 7 is the relocation target step, 25–28 the multiplayer markers | Unknown | Read the placement handler for these ids |
+| `Cgendam.obj` placement | Appended to the flat registry; no map references it | Presumed run-time damage overlays | Trace the damage code |
+| Sound and ambience triggers | Not examined | Unknown | — |
+| `minimap.col` / `Data/minimap.col` | Not examined | Unknown | — |
+
+### 11.7 Suggested Order of Work
+
+The entries that one further controlled edit each would settle: information token radius,
+American and Neutral character type lists, encumbrance, soldier field `+306`, the French and
+Italian nationality codes, and the mission parameter blocks.
 
 ---
 
@@ -1018,8 +1081,8 @@ In Soldiers at War, each cell stores 4 16-bit component words at offsets `+0`, `
 | **Slot 1** | `+2` | **Left Wall Structure** | Word 1 encodes left wall segments (`lwood1`, `lmetal1`, `ldrtwall`, `lbarb`). Usually `0x0001` when absent. |
 | **Slot 2** | `+4` | **Right Wall Structure** | Word 2 encodes right wall segments (`rwood1`, `rmetal1`, `rdrtwall`, `rbarb`). |
 | **Slot 3** | `+6` | **Clutter / Object** | Word 3 references the clutter partition (trees, vehicles, aircraft pieces, furniture). |
-| **Byte 4** | `+8` | **Unknown Attribute** | `0xFF` or `0x00` (§11). |
-| **DWORD 5** | `+9` | **Cell Flags** | Cover level in bits 18–20 (§3.7); other bits open. |
+| **Byte 4** | `+8` | **Black-Out Mask** | `0xFF` or `0x00`; set by the editor's Black Out mode (§11.2 for what is still open). |
+| **DWORD 5** | `+9` | **Cell Flags** | Cover level in bits 18–20 and the marker bits of §3.7; undecoded bits are listed in §11.2. |
 
 ---
 
