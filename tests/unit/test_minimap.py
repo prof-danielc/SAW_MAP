@@ -35,10 +35,8 @@ def test_surface_color_mapping(mock_tileset: TilesetDefinition):
     # Railroad steel
     assert get_surface_color("strack2") == (55, 55, 60)
 
-    # Grass (with winter context defaults to snow)
-    assert get_surface_color("sgrass", has_snow_context=True) == (210, 215, 220)
-    # Grass (summer context)
-    assert get_surface_color("sgrass", has_snow_context=False) == (70, 120, 60)
+    # Grass
+    assert get_surface_color("sgrass") == (70, 120, 60)
 
     # None / Empty
     assert get_surface_color(None) == (10, 12, 16)
@@ -54,17 +52,21 @@ def test_generate_minimap_image(mock_tileset: TilesetDefinition):
             grp = 2 if x < 10 else 3
             # Group 2 is ssnow1, Group 3 is sdirt
             raw_w = (1 << 15) | (0 << 7) | (grp & 0x7F)
-            comp_surf = CellComponent.from_raw_word(ComponentType.CLUTTER, raw_w)
-            empty_comp = CellComponent(ComponentType.FLOOR, False, 0, 0, 0)
+            comp_surf = CellComponent.from_raw_word(ComponentType.FLOOR, raw_w)
+            empty_comp = CellComponent(ComponentType.CLUTTER, False, 0, 0, 0)
             cells[(x, y, 0)] = MapCell(
                 x=x,
                 y=y,
                 z=0,
-                floor=empty_comp,
+                floor=comp_surf,
                 left_wall=empty_comp,
                 right_wall=empty_comp,
-                clutter=comp_surf,
+                clutter=empty_comp,
             )
+
+    # A tree (flat group 10 = snwtree1) at (3, 3) and a left wall (group 6) at (12, 12)
+    cells[(3, 3, 0)].clutter = CellComponent.from_raw_word(ComponentType.CLUTTER, (1 << 15) | 10)
+    cells[(12, 12, 0)].left_wall = CellComponent.from_raw_word(ComponentType.LEFT_WALL, (1 << 15) | 6)
 
     doc = MapDocument(title="MinimapTest", version="21", width=20, height=20, cells=cells)
     img = generate_minimap_image(doc, mock_tileset, active_layer=0)
@@ -82,6 +84,10 @@ def test_generate_minimap_image(mock_tileset: TilesetDefinition):
     r, g, b, a = img.getpixel((15, 15))
     assert (r, g, b) == (130, 90, 50)
     assert a == 255
+
+    # Objects and walls override the ground color
+    assert img.getpixel((3, 3))[:3] == (35, 75, 30)
+    assert img.getpixel((12, 12))[:3] == (45, 45, 50)
 
 
 def test_minimap_calculator_bounds_offset():

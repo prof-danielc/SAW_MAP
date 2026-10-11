@@ -21,10 +21,51 @@ from saw_map.rendering.backend_base import IRenderer
 from saw_map.rendering.draw_order import DrawOrderStrategy, RenderItem
 from saw_map.rendering.fallback import create_placeholder_sprite
 from saw_map.viewer.camera import Camera, ViewPerspective
+from saw_map.viewer.input_handler import InputAction, InputHandler
 from saw_map.viewer.inspector import CellInspector
 from saw_map.viewer.minimap import MinimapCalculator, generate_minimap_image
+from saw_map.viewer.overlays import OverlayModel
 
 logger = get_logger("rendering.pygame")
+
+# Pygame key code -> semantic input action
+_KEY_ACTIONS: Dict[int, InputAction] = {
+    pygame.K_LEFT: InputAction.PAN_LEFT,
+    pygame.K_a: InputAction.PAN_LEFT,
+    pygame.K_RIGHT: InputAction.PAN_RIGHT,
+    pygame.K_d: InputAction.PAN_RIGHT,
+    pygame.K_UP: InputAction.PAN_UP,
+    pygame.K_w: InputAction.PAN_UP,
+    pygame.K_DOWN: InputAction.PAN_DOWN,
+    pygame.K_s: InputAction.PAN_DOWN,
+    pygame.K_PLUS: InputAction.ZOOM_IN,
+    pygame.K_EQUALS: InputAction.ZOOM_IN,
+    pygame.K_KP_PLUS: InputAction.ZOOM_IN,
+    pygame.K_MINUS: InputAction.ZOOM_OUT,
+    pygame.K_UNDERSCORE: InputAction.ZOOM_OUT,
+    pygame.K_KP_MINUS: InputAction.ZOOM_OUT,
+    pygame.K_HOME: InputAction.RESET_VIEW,
+    pygame.K_r: InputAction.RESET_VIEW,
+    pygame.K_PAGEUP: InputAction.ELEVATION_UP,
+    pygame.K_e: InputAction.ELEVATION_UP,
+    pygame.K_PAGEDOWN: InputAction.ELEVATION_DOWN,
+    pygame.K_q: InputAction.ELEVATION_DOWN,
+    pygame.K_l: InputAction.TOGGLE_LAYER_ISOLATION,
+    pygame.K_TAB: InputAction.TOGGLE_PERSPECTIVE,
+    pygame.K_t: InputAction.TOGGLE_PERSPECTIVE,
+    pygame.K_m: InputAction.TOGGLE_MINIMAP,
+    pygame.K_i: InputAction.TOGGLE_SIDEBAR,
+    pygame.K_F1: InputAction.TOGGLE_METADATA,
+    pygame.K_h: InputAction.TOGGLE_METADATA,
+    pygame.K_1: InputAction.TOGGLE_FLOORS,
+    pygame.K_2: InputAction.TOGGLE_LEFT_WALLS,
+    pygame.K_3: InputAction.TOGGLE_RIGHT_WALLS,
+    pygame.K_4: InputAction.TOGGLE_CLUTTER,
+    pygame.K_p: InputAction.CYCLE_PALETTE,
+    pygame.K_F11: InputAction.TOGGLE_FULLSCREEN,
+    pygame.K_f: InputAction.TOGGLE_FULLSCREEN,
+    pygame.K_ESCAPE: InputAction.EXIT,
+}
 
 
 class PygameRenderer(IRenderer):
@@ -57,6 +98,33 @@ class PygameRenderer(IRenderer):
         self.drag_start_mouse: Tuple[int, int] = (0, 0)
         self.drag_start_cam: Tuple[float, float] = (0.0, 0.0)
 
+        self.input = InputHandler(
+            self.camera,
+            on_recenter=self._update_map_center,
+            on_cycle_palette=self.cycle_palette,
+            on_toggle_fullscreen=self._toggle_fullscreen,
+            on_exit=self._stop,
+        )
+
+    def _toggle_fullscreen(self) -> None:
+        """Toggles the display between fullscreen and windowed mode."""
+        try:
+            pygame.display.toggle_fullscreen()
+        except pygame.error as exc:
+            logger.warning(f"Fullscreen toggle not supported: {exc}")
+
+    def _update_map_center(self) -> None:
+        """Centers the camera on the mid-point of the active map."""
+        if not self.map_doc:
+            return
+        mid_x, mid_y = self.map_doc.center
+        if self.camera.perspective == ViewPerspective.ISOMETRIC:
+            sx, sy = self.iso_transform.world_to_screen(mid_x, mid_y, 0)
+        else:
+            sx, sy = self.top_transform.world_to_screen(mid_x, mid_y, 0)
+        self.camera.x = -sx
+        self.camera.y = -sy
+
     def initialize(
         self,
         width: int = 1280,
@@ -87,15 +155,8 @@ class PygameRenderer(IRenderer):
         self.asset_loader = asset_loader
         self.tileset = tileset
         self.palette = palette or asset_loader.load_palette("Win.pal")
-        # Center camera on map mid-point
-        mid_x = map_doc.width / 2.0
-        mid_y = map_doc.height / 2.0
-        if self.camera.perspective == ViewPerspective.ISOMETRIC:
-            sx, sy = self.iso_transform.world_to_screen(mid_x, mid_y, 0)
-        else:
-            sx, sy = self.top_transform.world_to_screen(mid_x, mid_y, 0)
-        self.camera.x = -sx
-        self.camera.y = -sy
+        self._minimap_surface = None
+        self._update_map_center()
 
     def _get_surface_data(self, item: RenderItem, palette: Palette) -> Optional[Tuple[pygame.Surface, int, int]]:
         """Loads and caches (pygame.Surface, offset_x, offset_y) from PIL Image."""
@@ -162,6 +223,7 @@ class PygameRenderer(IRenderer):
             return
 
         self.camera = camera
+        self.input.camera = camera
         self.screen.fill((20, 24, 30))
 
         items = DrawOrderStrategy.generate_render_list(
@@ -228,6 +290,8 @@ class PygameRenderer(IRenderer):
             self._draw_minimap()
         if self.camera.show_sidebar:
             self._draw_sidebar()
+        if self.camera.show_metadata:
+            self._draw_metadata_dialog()
 
         pygame.display.flip()
 
@@ -280,23 +344,9 @@ class PygameRenderer(IRenderer):
         if not self.map_doc:
             return
 
-        parts = [
-            f"Map: {self.map_doc.title} ({self.map_doc.width}x{self.map_doc.height})",
-            f"View: {self.camera.perspective.value.upper()}",
-            f"Layer: Z={self.camera.active_max_layer}/6",
-            f"Zoom: {self.camera.zoom:.2f}x",
-        ]
-        if self.hovered_cell:
-            hx, hy, hz = self.hovered_cell
-            cell = self.map_doc.get_cell(hx, hy, hz)
-            tile_info = ""
-            if cell:
-                c_info = CellInspector.inspect_cell(cell, self.tileset)
-                if c_info.primary_tile_name:
-                    tile_info = f" [{c_info.primary_tile_name}:{c_info.primary_tile_frame}]"
-            parts.append(f"Hover: ({hx}, {hy}, {hz}){tile_info}")
-
-        status_text = " | ".join(parts)
+        status_text = OverlayModel.get_status_bar_text(
+            self.map_doc, self.camera, self.hovered_cell, self.tileset
+        )
         text_surf = self.font.render(status_text, True, (220, 225, 230))
         max_w = self.width - (280 if self.camera.show_sidebar else 24)
         if text_surf.get_width() > max_w and len(status_text) > 20:
@@ -461,6 +511,34 @@ class PygameRenderer(IRenderer):
                     self.screen.blit(txt, (left + 14, y))
                 y += 18
 
+    def _draw_metadata_dialog(self) -> None:
+        """Renders centered map metadata dialog (map, tileset, mission briefing)."""
+        panel_w = min(640, self.width - 40)
+        panel_h = min(460, self.height - 80)
+        if panel_w < 200 or panel_h < 100:
+            return
+        left = (self.width - panel_w) // 2
+        top = (self.height - panel_h) // 2
+        pygame.draw.rect(self.screen, (15, 18, 22), (left, top, panel_w, panel_h))
+        pygame.draw.rect(self.screen, (218, 165, 32), (left, top, panel_w, panel_h), 1)
+
+        title = self.font_title.render("MAP METADATA (F1 / H)", True, (218, 165, 32))
+        self.screen.blit(title, (left + 16, top + 12))
+
+        line_h = 18
+        max_lines = (panel_h - 52) // line_h
+        lines = OverlayModel.get_map_metadata_lines(self.map_doc, self.tileset, wrap_width=72)
+        if len(lines) > max_lines:
+            lines = lines[: max_lines - 1] + ["..."]
+
+        y = top + 42
+        for line in lines:
+            if line:
+                is_heading = line.isupper() or line.startswith(("MAP:", "TILESET DEFINITION:"))
+                font = self.font_bold if is_heading else self.font
+                color = (0, 220, 220) if is_heading else (220, 225, 230)
+                self.screen.blit(font.render(line, True, color), (left + 16, y))
+            y += line_h
 
     def run_loop(self) -> None:
         """Starts Pygame event loop."""
@@ -474,71 +552,50 @@ class PygameRenderer(IRenderer):
                     self.height = event.h
                     self.screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
                 elif event.type == pygame.MOUSEMOTION:
-                    self.update_hover(event.pos[0], event.pos[1])
                     if self.dragging:
                         dx = (event.pos[0] - self.drag_start_mouse[0]) / self.camera.zoom
                         dy = (event.pos[1] - self.drag_start_mouse[1]) / self.camera.zoom
                         self.camera.x = self.drag_start_cam[0] + dx
                         self.camera.y = self.drag_start_cam[1] + dy
+                    self.update_hover(event.pos[0], event.pos[1])
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if event.button == 1:
                         self.dragging = True
                         self.drag_start_mouse = event.pos
                         self.drag_start_cam = (self.camera.x, self.camera.y)
-                    elif event.button == 4:
-                        self.camera.zoom_in()
-                    elif event.button == 5:
-                        self.camera.zoom_out()
+                    elif event.button in (4, 5):
+                        self.input.handle_zoom_at_cursor(
+                            event.button == 4,
+                            float(event.pos[0]),
+                            float(event.pos[1]),
+                            float(self.width),
+                            float(self.height),
+                        )
+                        self.update_hover(event.pos[0], event.pos[1])
                 elif event.type == pygame.MOUSEBUTTONUP:
                     if event.button == 1:
                         self.dragging = False
                 elif event.type == pygame.KEYDOWN:
                     self._handle_keydown(event.key)
 
-            self.render_frame(self.camera)
-            self.clock.tick(60)
+            if self.running:
+                self.render_frame(self.camera)
+                self.clock.tick(60)
 
         pygame.quit()
 
     def _handle_keydown(self, key: int) -> None:
-        """Processes keyboard input."""
-        cam = self.camera
-        step = 40.0 / cam.zoom
+        """Translates a key press into an InputAction handled by the shared InputHandler."""
+        action = _KEY_ACTIONS.get(key)
+        if action is None:
+            return
+        self.input.handle_action(action)
+        if action != InputAction.EXIT:
+            self.update_hover(*pygame.mouse.get_pos())
 
-        if key in (pygame.K_LEFT, pygame.K_a): cam.pan(step, 0)
-        elif key in (pygame.K_RIGHT, pygame.K_d): cam.pan(-step, 0)
-        elif key in (pygame.K_UP, pygame.K_w): cam.pan(0, step)
-        elif key in (pygame.K_DOWN, pygame.K_s): cam.pan(0, -step)
-        elif key in (pygame.K_PLUS, pygame.K_EQUALS): cam.zoom_in()
-        elif key in (pygame.K_MINUS, pygame.K_UNDERSCORE): cam.zoom_out()
-        elif key in (pygame.K_HOME, pygame.K_r): cam.reset()
-        elif key in (pygame.K_PAGEUP, pygame.K_e):
-            cam.active_max_layer = min(6, cam.active_max_layer + 1)
-            cam.isolated_layer = None
-            self.update_hover(*pygame.mouse.get_pos())
-        elif key in (pygame.K_PAGEDOWN, pygame.K_q):
-            cam.active_max_layer = max(0, cam.active_max_layer - 1)
-            cam.isolated_layer = None
-            self.update_hover(*pygame.mouse.get_pos())
-        elif key == pygame.K_l:
-            cam.isolated_layer = cam.active_max_layer if cam.isolated_layer is None else None
-            self.update_hover(*pygame.mouse.get_pos())
-        elif key in (pygame.K_TAB, pygame.K_t):
-            cam.perspective = ViewPerspective.TOP_DOWN if cam.perspective == ViewPerspective.ISOMETRIC else ViewPerspective.ISOMETRIC
-            self.update_hover(*pygame.mouse.get_pos())
-        elif key == pygame.K_m: cam.show_minimap = not cam.show_minimap
-        elif key == pygame.K_i: cam.show_sidebar = not cam.show_sidebar
-        elif key == pygame.K_1: cam.show_floors = not cam.show_floors
-        elif key == pygame.K_2: cam.show_left_walls = not cam.show_left_walls
-        elif key == pygame.K_3: cam.show_right_walls = not cam.show_right_walls
-        elif key == pygame.K_4: cam.show_clutter = not cam.show_clutter
-        elif key == pygame.K_p: self.cycle_palette()
-        elif key in (pygame.K_F11, pygame.K_f):
-            try:
-                pygame.display.toggle_fullscreen()
-            except Exception:
-                pass
-        elif key == pygame.K_ESCAPE: self.running = False
+    def _stop(self) -> None:
+        """Requests termination of the event loop."""
+        self.running = False
 
     def close(self) -> None:
         """Closes Pygame."""

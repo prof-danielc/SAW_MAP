@@ -53,3 +53,16 @@ def test_real_airfield_set_if_available():
     assert len(ts.clutter) == 28
     assert "sgrass" in ts.surfaces
     assert "snwtree1" in ts.clutter
+
+
+def test_set_parser_inline_comment_on_count_line():
+    """Validates trailing '# ...' comments, as on the count line of Messina.set."""
+    content = "\n".join([
+        "Village near Messina, Italy.", "", "Defs", "", "1 1 1 2 # s l r c", "",
+        "sgrass", "lwood1", "rwood1", "tree1 # oak", "crat1",
+    ])
+    ts = TilesetParser.parse_text(content, name="Messina")
+    assert ts.surfaces == ["sgrass"]
+    assert ts.left_walls == ["lwood1"]
+    assert ts.right_walls == ["rwood1"]
+    assert ts.clutter == ["tree1", "crat1"]

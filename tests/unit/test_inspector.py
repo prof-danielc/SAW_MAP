@@ -20,14 +20,14 @@ def sample_tileset() -> TilesetDefinition:
 
 def test_inspect_cell_tile_20_18_0(sample_tileset: TilesetDefinition):
     """Validates decomposition of Airfield tile (20, 18, 0) components."""
-    # w0 = 0xFF93 (presence=1, frame=255, group=19) -> Height Mask
-    comp0 = CellComponent.from_raw_word(ComponentType.FLOOR, 0xFF93)
-    # w1 = 0x0000 (presence=0) -> Empty Left Wall
-    comp1 = CellComponent.from_raw_word(ComponentType.LEFT_WALL, 0x0000)
-    # w2 = 0x001F (presence=0) -> Empty Right Wall
-    comp2 = CellComponent.from_raw_word(ComponentType.RIGHT_WALL, 0x001F)
-    # w3 = 0x8182 (presence=1, frame=3, group=2) -> ssnow1 ground surface
-    comp3 = CellComponent.from_raw_word(ComponentType.CLUTTER, 0x8182)
+    # w0 = 0x8182 (presence=1, frame=3, group=2) -> ssnow1 ground surface
+    comp0 = CellComponent.from_raw_word(ComponentType.FLOOR, 0x8182)
+    # w1 = 0x0001 (presence=0) -> Empty Left Wall
+    comp1 = CellComponent.from_raw_word(ComponentType.LEFT_WALL, 0x0001)
+    # w2 = 0x0000 (presence=0) -> Empty Right Wall
+    comp2 = CellComponent.from_raw_word(ComponentType.RIGHT_WALL, 0x0000)
+    # w3 = 0x8190 (presence=1, frame=3, group=16) -> snwtree1 in the fixture registry
+    comp3 = CellComponent.from_raw_word(ComponentType.CLUTTER, 0x8190)
 
     cell = MapCell(
         x=20,
@@ -37,30 +37,33 @@ def test_inspect_cell_tile_20_18_0(sample_tileset: TilesetDefinition):
         left_wall=comp1,
         right_wall=comp2,
         clutter=comp3,
-        elevation_attr=1,
-        flags=0x25000000,
+        elevation_attr=0xFF,
+        flags=0x001F0000,
     )
 
     info = CellInspector.inspect_cell(cell, sample_tileset)
 
     assert info.coord == (20, 18, 0)
-    assert info.elevation_attr == 1
-    assert info.flags == 0x25000000
+    assert info.elevation_attr == 0xFF
+    assert info.flags == 0x001F0000
     assert len(info.components) == 4
 
-    # Slot 0: Roof / Ceiling mask
+    # Slot 0: Ground surface (ssnow1, frame 3)
     slot0 = info.components[0]
-    assert slot0.slot_name == "Roof / Ceiling"
+    assert slot0.slot_name == "Floor / Surface"
     assert slot0.is_present is True
-    assert slot0.raw_word == 0xFF93
-    assert slot0.is_mask is True
-    assert slot0.sprite_frame_index == 255
-    assert "Mask" in slot0.semantic_role
+    assert slot0.raw_word == 0x8182
+    assert slot0.tileset_group_index == 2
+    assert slot0.sprite_frame_index == 3
+    assert slot0.asset_name == "ssnow1"
+    assert slot0.semantic_role == "Ground Surface"
+    assert "ssnow1" in slot0.details_line
 
-    # Slot 1: Left Wall (empty)
+    # Slot 1: Left Wall (empty, default word 0x0001)
     slot1 = info.components[1]
     assert slot1.slot_name == "Left Wall"
     assert slot1.is_present is False
+    assert slot1.raw_word == 0x0001
     assert slot1.status_label == "EMPTY"
 
     # Slot 2: Right Wall (empty)
@@ -69,18 +72,15 @@ def test_inspect_cell_tile_20_18_0(sample_tileset: TilesetDefinition):
     assert slot2.is_present is False
     assert slot2.status_label == "EMPTY"
 
-    # Slot 3: Procedural Ground Surface (ssnow1, frame 3)
+    # Slot 3: Clutter object (snwtree1, frame 3)
     slot3 = info.components[3]
-    assert slot3.slot_name == "Surface / Clutter"
+    assert slot3.slot_name == "Clutter / Object"
     assert slot3.is_present is True
-    assert slot3.raw_word == 0x8182
-    assert slot3.tileset_group_index == 2
-    assert slot3.sprite_frame_index == 3
-    assert slot3.asset_name == "ssnow1"
-    assert slot3.semantic_role == "Ground Surface"
-    assert "ssnow1" in slot3.details_line
+    assert slot3.asset_name == "snwtree1"
+    assert slot3.semantic_role == "Clutter Item"
+    assert "snwtree1.obj" in slot3.details_line
 
-    # Primary tile identification
+    # Primary tile identification: the floor wins over clutter
     assert info.primary_tile_name == "ssnow1.obj"
     assert info.primary_tile_frame == 3
     assert info.primary_tile_label == "ssnow1.obj (Frame 3)"

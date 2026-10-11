@@ -1,6 +1,7 @@
-"""Integration tests for rendering overlays (minimap and sidebar) across backends."""
+"""Integration tests for rendering overlays (minimap, sidebar, metadata dialog) across backends."""
 
 import os
+import pygame
 import pytest
 from saw_map.assets.loader import AssetLoader
 from saw_map.formats.map_reader import MapReader
@@ -38,12 +39,23 @@ def test_pygame_minimap_and_sidebar_rendering():
     renderer.hovered_cell = None
     renderer.render_frame(cam)
 
+    # 3. Key presses route through the shared InputHandler; metadata dialog renders
+    renderer._handle_keydown(pygame.K_F1)
+    assert cam.show_metadata is True
+    renderer._handle_keydown(pygame.K_PAGEDOWN)
+    assert cam.active_max_layer == 5
+    renderer._handle_keydown(pygame.K_HOME)
+    mid_x, mid_y = doc.center
+    assert (cam.x, cam.y) == tuple(-v for v in renderer.iso_transform.world_to_screen(mid_x, mid_y, 0))
+    renderer.render_frame(cam)
+
     renderer.close()
 
 
 @pytest.mark.skipif(not os.path.exists(AIRFIELD_MAP), reason="Game assets not found")
 def test_arcade_minimap_and_sidebar_rendering():
     """Validates Arcade rendering frames with minimap and sidebar enabled."""
+    import arcade
     from saw_map.rendering.arcade_backend import ArcadeRenderer
 
     doc = MapReader.parse_map(AIRFIELD_MAP)
@@ -64,6 +76,16 @@ def test_arcade_minimap_and_sidebar_rendering():
     # 2. Render frame with no hovered cell
     renderer.hovered_cell = None
     renderer.render_frame(cam)
+
+    # 3. Key presses route through the shared InputHandler; metadata dialog renders
+    renderer.window.on_key_press(arcade.key.H, 0)
+    assert cam.show_metadata is True
+    renderer.window.on_key_press(arcade.key.Q, 0)
+    assert cam.active_max_layer == 5
+    renderer.window.on_mouse_scroll(320, 240, 0, 1)
+    assert cam.zoom == 1.25
+    renderer.render_frame(cam)
+    assert renderer._metadata_texts
 
     renderer.close()
 

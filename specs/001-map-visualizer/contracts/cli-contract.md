@@ -29,7 +29,8 @@ python run_viewer.py <MAP_FILE> [OPTIONS]
 | `--view`, `-v` | Option | No | `isometric` | Initial view perspective: `isometric` or `top-down` |
 | `--diagnostics`, `-d`| Flag | No | `False` | Enable verbose reverse-engineering inspection output in console |
 | `--log-level` | Option | No | `INFO` | Console logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-| `--backend` | Option | No | `arcade` | Rendering backend selection: `arcade` (default) or `pygame` |
+| `--backend`, `-b` | Option | No | `arcade` | Rendering backend selection: `arcade` (default) or `pygame` |
+| `--maximize` | Flag | No | `False` | Start the visualizer window maximized |
 | `--help`, `-h` | Flag | No | — | Display help message and options usage |
 
 ---
@@ -54,8 +55,8 @@ When launching with `--diagnostics`:
 [INFO] Loading Soldiers at War Map: Research/SSI/Soldiers at War/Single_g/Airfield.map
 [DEBUG] Detected Gzip compression header (magic 1F 8B 08)
 [DEBUG] Decompressed map stream: 1,214,559 bytes
-[DEBUG] Header verified: version=21 signature='AMB_MAP' title='Airfield'
-[DEBUG] Active map dimensions bounded to: 104x80 (max bounds: 130x100x7)
+[DEBUG] Map header verified: version=21, title='Airfield'
+[INFO] Loaded map 'Airfield' (tileset 'Airfield'): active window 104x80 at (13, 10) (max 130x100x7)
 [INFO] Resolving companion set: Sets/Airfield.set
 [DEBUG] Parsed set 'Airfield': 13 surfaces, 12 left walls, 12 right walls, 28 clutter
 [INFO] Loading palette: Misc/Win.pal (256 RGB colors)

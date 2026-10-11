@@ -68,7 +68,7 @@ With the visualizer open:
 3. **Layer Step**: Press `PageDown` or `Q` to filter upper elevation layers; observe lower-level building interiors become visible.
 4. **Perspective Toggle**: Press `Tab` or `T` to toggle between Isometric and Top-Down grid view.
 5. **Minimap**: Press `M` to toggle the corner minimap overlay.
-6. **Inspection Panel**: Press `I` to open the sidebar for deep cell diagnostic properties.
+6. **Inspection Panel**: Press `I` to open the sidebar for deep cell diagnostic properties; press `F1` or `H` for the map metadata dialog.
 7. **Palette Switch**: Press `P` to cycle between standard daylight and dark/nighttime palettes.
 
 ### Scenario 5: Error Handling for Nonexistent File

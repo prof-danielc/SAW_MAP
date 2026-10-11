@@ -89,13 +89,19 @@ from saw_map.viewer.camera import Camera
 
 class IRenderer(ABC):
     @abstractmethod
-    def initialize(self, width: int, height: int, title: str) -> None:
+    def initialize(self, width: int, height: int, title: str, maximized: bool = False) -> None:
         """Initializes window and rendering context."""
         ...
 
     @abstractmethod
-    def set_map(self, map_doc: MapDocument) -> None:
-        """Binds the map document and builds cached render items."""
+    def set_map(
+        self,
+        map_doc: MapDocument,
+        asset_loader: IAssetLoader,
+        tileset: Optional[TilesetDefinition] = None,
+        palette: Optional[Palette] = None,
+    ) -> None:
+        """Binds the map document and asset dependencies for rendering."""
         ...
 
     @abstractmethod
@@ -107,23 +113,33 @@ class IRenderer(ABC):
     def run_loop(self) -> None:
         """Starts main application event loop."""
         ...
+
+    @abstractmethod
+    def close(self) -> None:
+        """Cleans up resources and closes the viewport window."""
+        ...
 ```
 
 ---
 
 ## 5. Viewport Keyboard & Mouse Interaction Contract
 
+Backends translate native key codes into `InputAction` values and delegate the state change to the shared `InputHandler` (`saw_map.viewer.input_handler`).
+
 | Input Action | Primary Key / Event | Function |
 |---|---|---|
 | **Pan** | Left Mouse Drag, Arrow Keys, WASD | Moves camera center across map board |
-| **Zoom In** | Mouse Wheel Up, `+` / `=` | Increases zoom scale ($1.25\times$ per step) |
-| **Zoom Out** | Mouse Wheel Down, `-` | Decreases zoom scale ($0.8\times$ per step) |
-| **Reset View** | `Home` or `R` | Centers camera on map origin at $1.0\times$ zoom |
+| **Zoom In** | Mouse Wheel Up, `+` / `=` | Increases zoom scale ($1.25\times$ per step); the wheel zooms around the cursor |
+| **Zoom Out** | Mouse Wheel Down, `-` | Decreases zoom scale ($0.8\times$ per step); the wheel zooms around the cursor |
+| **Reset View** | `Home` or `R` | Centers camera on the middle of the playable map at $1.0\times$ zoom |
 | **Elevation Up** | `PageUp` or `E` | Increments `active_max_layer` ($0 \dots 6$) |
 | **Elevation Down**| `PageDown` or `Q` | Decrements `active_max_layer` ($0 \dots 6$) |
 | **Toggle Perspective**| `Tab` or `T` | Switches between Isometric and 2D Top-Down grid |
 | **Toggle Minimap** | `M` | Toggles 2D minimap corner overview |
+| **Isolate Layer** | `L` | Toggles rendering of only the active elevation layer |
 | **Toggle Sidebar** | `I` | Toggles detailed cell inspection panel |
+| **Toggle Metadata** | `F1` or `H` | Toggles the map metadata dialog (map, tileset, mission briefing) |
+| **Toggle Fullscreen** | `F11` or `F` | Toggles fullscreen display mode |
 | **Toggle Floors** | `1` | Toggles ground surface visibility |
 | **Toggle Left Walls** | `2` | Toggles left-facing wall visibility |
 | **Toggle Right Walls** | `3` | Toggles right-facing wall visibility |

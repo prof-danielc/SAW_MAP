@@ -10,6 +10,11 @@ from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
 
 
+# AMB_MAP stream versions sharing the 193-byte header and 13-byte cell layout.
+# Version 19 (Menu/Demo.MAP) only differs in the records following the tile array.
+SUPPORTED_MAP_VERSIONS: Tuple[str, ...] = ("19", "20", "21")
+
+
 class ComponentType(IntEnum):
     """Component categories corresponding to word positions in a 13-byte map cell."""
     FLOOR = 0
@@ -33,10 +38,7 @@ class CellComponent:
 
         Bit 15: Presence (1 = present, 0 = absent)
         Bits 7-14: Sprite frame index within target archive (0..255)
-        Bits 0-6: Tileset group index / object index in flat registry (0..127)
-
-        Values with frame index >= 200 (such as 0xFE00 / 0xFF93) represent height/roof
-        attributes or empty masks rather than valid sprite frames.
+        Bits 0-6: Object group index in the flat tileset registry (0..127)
         """
         is_present = bool((raw_word >> 15) & 1)
         tileset_group_index = raw_word & 0x7F
@@ -50,10 +52,9 @@ class CellComponent:
         )
 
 
-GLOBAL_CLUTTER: List[str] = [
-    "People", "Can", "Turret", "Token", "Specials", "Cgendam",
-    "Newtree1", "Newtree2", "Newtree3", "Newtree4", "Newtree5", "Newtree6", "Newtree7",
-]
+# Engine built-in archives appended to the flat registry directly after the .set
+# entries, in the load order of the tileset loader (SAW_TD sub_443D4A).
+GLOBAL_CLUTTER: List[str] = ["Cgendam", "Can", "Token", "People", "Turret"]
 
 
 @dataclass(slots=True)
@@ -70,44 +71,26 @@ class MapCell:
     flags: int = 0
 
     @property
-    def has_clutter_object(self) -> bool:
-        """True if cell flags indicate a placed visual clutter object (bit 31 set and group > 0)."""
-        return bool(((self.flags >> 31) & 1) and (((self.flags >> 24) & 0x7F) > 0))
-
-    @property
-    def clutter_object_group(self) -> int:
-        """Tileset group index of clutter object in flat registry (37..N)."""
-        return (self.flags >> 24) & 0x7F
-
-    @property
     def roof_cutoff_layer(self) -> int:
-        """Elevation cutoff layer for roof/ceiling geometry encoded in flags bits 18..20."""
+        """Cover level of the floor component, encoded in flags bits 18..20.
+
+        The engine draws word 0 only while this value is greater than the active
+        view level; 7 means the floor is never hidden by a higher level.
+        """
         return (self.flags >> 18) & 7
 
-    @property
-    def clutter_object_frame(self) -> int:
-        """Sprite frame index of clutter object within its archive."""
-        return self.floor.raw_word & 0x7F
-
     def is_empty(self) -> bool:
-        """Returns True if none of the 4 components and no clutter object are active/present."""
+        """Returns True if none of the 4 components is present."""
         return not (
             self.floor.is_present
             or self.left_wall.is_present
             or self.right_wall.is_present
             or self.clutter.is_present
-            or self.has_clutter_object
         )
 
     def has_visual_content(self) -> bool:
-        """Returns True if any component has an active renderable sprite or clutter object."""
-        return (
-            (self.floor.is_present and (self.floor.sprite_frame_index < 200 or self.floor.tileset_group_index > 0))
-            or (self.left_wall.is_present and (self.left_wall.sprite_frame_index < 200 or self.left_wall.tileset_group_index > 0))
-            or (self.right_wall.is_present and (self.right_wall.sprite_frame_index < 200 or self.right_wall.tileset_group_index > 0))
-            or (self.clutter.is_present and (self.clutter.sprite_frame_index < 200 or self.clutter.tileset_group_index > 0))
-            or self.has_clutter_object
-        )
+        """Returns True if any component has a renderable sprite."""
+        return not self.is_empty()
 
     def get_component(self, comp_type: ComponentType) -> CellComponent:
         """Retrieves component by type enum."""
@@ -132,7 +115,7 @@ class TilesetDefinition:
     clutter: List[str] = field(default_factory=list)
 
     def get_all_assets(self) -> List[str]:
-        """Returns the flat registry of assets (surfaces + left_walls + right_walls + clutter + GLOBAL_CLUTTER)."""
+        """Returns the flat registry of assets (.set entries in file order + GLOBAL_CLUTTER)."""
         return self.surfaces + self.left_walls + self.right_walls + self.clutter + GLOBAL_CLUTTER
 
     def get_component_type_for_group(self, group_idx: int) -> ComponentType:
@@ -153,66 +136,22 @@ class TilesetDefinition:
         """Resolves target .obj archive name by flat index in registry (0..N)."""
         all_assets = self.get_all_assets()
         if 0 <= group_idx < len(all_assets):
-            asset = all_assets[group_idx]
-            # In winter maps where ssnow1 is present, default surface 0 (sgrass) renders as ssnow1
-            if group_idx == 0 and asset == "sgrass" and "ssnow1" in self.surfaces:
-                return "ssnow1"
-            return asset
-        return None
-
-    def resolve_asset(self, comp_type: ComponentType, group_idx: int) -> Optional[str]:
-        """Resolves target .obj archive name given component type and group index.
-
-        Supports flat registry indexing as well as partitioned category indexing.
-        """
-        # Check partitioned resolution
-        if comp_type == ComponentType.FLOOR:
-            if 0 <= group_idx < len(self.surfaces):
-                asset = self.surfaces[group_idx]
-                if group_idx == 0 and asset == "sgrass" and "ssnow1" in self.surfaces:
-                    return "ssnow1"
-                return asset
-            return None
-        elif comp_type == ComponentType.LEFT_WALL:
-            if 0 <= group_idx < len(self.left_walls):
-                return self.left_walls[group_idx]
-            num_surf = len(self.surfaces)
-            rel_idx = group_idx - num_surf
-            if 0 <= rel_idx < len(self.left_walls):
-                return self.left_walls[rel_idx]
-            return None
-        elif comp_type == ComponentType.RIGHT_WALL:
-            if 0 <= group_idx < len(self.right_walls):
-                return self.right_walls[group_idx]
-            num_surf = len(self.surfaces)
-            num_lwall = len(self.left_walls)
-            rel_idx = group_idx - num_surf - num_lwall
-            if 0 <= rel_idx < len(self.right_walls):
-                return self.right_walls[rel_idx]
-            return None
-        elif comp_type == ComponentType.CLUTTER:
-            if 0 <= group_idx < len(self.clutter):
-                return self.clutter[group_idx]
-            global_offset = group_idx - len(self.clutter)
-            if 0 <= global_offset < len(GLOBAL_CLUTTER):
-                return GLOBAL_CLUTTER[global_offset]
-            num_surf = len(self.surfaces)
-            num_lwall = len(self.left_walls)
-            num_rwall = len(self.right_walls)
-            rel_idx = group_idx - num_surf - num_lwall - num_rwall
-            if 0 <= rel_idx < len(self.clutter):
-                return self.clutter[rel_idx]
-            rel_global = rel_idx - len(self.clutter)
-            if 0 <= rel_global < len(GLOBAL_CLUTTER):
-                return GLOBAL_CLUTTER[rel_global]
-            return None
-
+            return all_assets[group_idx]
         return None
 
 
 @dataclass
 class MapDocument:
-    """Fully loaded Soldiers at War map document."""
+    """Fully loaded Soldiers at War map document.
+
+    `title` is the 128-byte header string, which the engine uses as the name of
+    the companion tileset (Sets/<title>.set). `name` is the map file stem and
+    `mission_text` the briefing text of the companion .txt file, when available.
+
+    The stream always stores a 130x100x7 grid; the playable area is a
+    `width` x `height` window starting at (`origin_x`, `origin_y`). Cell
+    coordinates are absolute grid indices, as shown by the Scenario Builder.
+    """
     title: str
     version: str
     width: int
@@ -220,17 +159,37 @@ class MapDocument:
     layer_count: int = 7
     tileset_names: List[str] = field(default_factory=list)
     cells: Dict[Tuple[int, int, int], MapCell] = field(default_factory=dict)
+    name: str = ""
+    mission_text: str = ""
+    origin_x: int = 0
+    origin_y: int = 0
 
     def __post_init__(self) -> None:
         """Validates map constraints per specification."""
-        if self.version not in ("20", "21"):
-            raise ValueError(f"Unsupported map version: '{self.version}'. Expected '20' or '21'.")
+        if self.version not in SUPPORTED_MAP_VERSIONS:
+            raise ValueError(f"Unsupported map version: '{self.version}'. Expected '19', '20' or '21'.")
         if not (20 <= self.width <= 130):
             raise ValueError(f"Map width {self.width} outside valid range [20, 130].")
         if not (20 <= self.height <= 100):
             raise ValueError(f"Map height {self.height} outside valid range [20, 100].")
         if self.layer_count != 7:
             raise ValueError(f"Map layer_count {self.layer_count} must equal 7.")
+        if self.origin_x < 0 or self.origin_x + self.width > 130:
+            raise ValueError(f"Map window x range [{self.origin_x}, {self.origin_x + self.width}) exceeds [0, 130).")
+        if self.origin_y < 0 or self.origin_y + self.height > 100:
+            raise ValueError(f"Map window y range [{self.origin_y}, {self.origin_y + self.height}) exceeds [0, 100).")
+
+    def contains(self, x: int, y: int) -> bool:
+        """Returns True if grid column x and row y lie inside the playable window."""
+        return (
+            self.origin_x <= x < self.origin_x + self.width
+            and self.origin_y <= y < self.origin_y + self.height
+        )
+
+    @property
+    def center(self) -> Tuple[float, float]:
+        """Grid coordinates (x, y) of the middle of the playable window."""
+        return (self.origin_x + self.width / 2.0, self.origin_y + self.height / 2.0)
 
     def get_cell(self, x: int, y: int, z: int) -> Optional[MapCell]:
         """Retrieves cell at coordinate (x, y, z), or None if unpopulated or out of bounds."""

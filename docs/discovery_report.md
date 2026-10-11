@@ -45,7 +45,7 @@
 | Set Name | Relative Path | Surfaces | Left Walls | Right Walls | Clutter |
 |---|---|---|---|---|---|
 | `master` | `Data/master.set` | - | - | - | - |
-| `msn01` | `Data/msn01.set` | - | - | - | - |
+| `msn01` | `Data/msn01.set` | 6 | 3 | 3 | 6 |
 | `Airfield` | `Sets/Airfield.set` | 13 | 12 | 12 | 28 |
 | `Anzio` | `Sets/Anzio.set` | 14 | 14 | 14 | 33 |
 | `Bastogne` | `Sets/Bastogne.set` | 14 | 11 | 11 | 29 |

@@ -69,7 +69,7 @@ def test_map_cell_is_empty():
 
 
 def test_tileset_definition_resolve():
-    """Validates asset name resolution across partitioned categories."""
+    """Validates asset name resolution through the flat registry (.set order)."""
     ts = TilesetDefinition(
         name="Airfield",
         surfaces=["sgrass", "shill"],
@@ -78,14 +78,19 @@ def test_tileset_definition_resolve():
         clutter=["tree1", "crat1"],
     )
 
-    assert ts.resolve_asset(ComponentType.FLOOR, 0) == "sgrass"
-    assert ts.resolve_asset(ComponentType.FLOOR, 1) == "shill"
-    assert ts.resolve_asset(ComponentType.FLOOR, 2) is None
+    assert ts.resolve_flat_asset(0) == "sgrass"
+    assert ts.resolve_flat_asset(1) == "shill"
+    assert ts.resolve_flat_asset(2) == "lwood1"
+    assert ts.resolve_flat_asset(3) == "lwood2"
+    assert ts.resolve_flat_asset(4) == "rwood1"
+    assert ts.resolve_flat_asset(6) == "crat1"
+    assert ts.resolve_flat_asset(99) is None
+    assert ts.resolve_flat_asset(-1) is None
 
-    assert ts.resolve_asset(ComponentType.LEFT_WALL, 1) == "lwood2"
-    assert ts.resolve_asset(ComponentType.RIGHT_WALL, 0) == "rwood1"
-    assert ts.resolve_asset(ComponentType.CLUTTER, 1) == "crat1"
-    assert ts.resolve_asset(ComponentType.CLUTTER, 99) is None
+    assert ts.get_component_type_for_group(1) == ComponentType.FLOOR
+    assert ts.get_component_type_for_group(3) == ComponentType.LEFT_WALL
+    assert ts.get_component_type_for_group(4) == ComponentType.RIGHT_WALL
+    assert ts.get_component_type_for_group(5) == ComponentType.CLUTTER
 
 
 def test_map_document_validation():
@@ -103,7 +108,7 @@ def test_map_document_validation():
 
     # Invalid version
     with pytest.raises(ValueError, match="Unsupported map version"):
-        MapDocument(title="Bad", version="19", width=50, height=50)
+        MapDocument(title="Bad", version="18", width=50, height=50)
 
     # Invalid width
     with pytest.raises(ValueError, match="width 15 outside valid range"):
@@ -115,10 +120,14 @@ def test_map_document_validation():
 
 
 def test_floor_empty_and_surface_unpacking():
-    """Validates reverse-engineered floor word conventions (0x0000 = empty; 0xFFxx = surface with variations)."""
+    """Validates component word conventions (bit 15 clear = absent, even when low bits are set)."""
     # 0x0000 is empty
     comp_zero = CellComponent.from_raw_word(ComponentType.FLOOR, 0x0000)
     assert comp_zero.is_present is False
+
+    # 0x0001 is the default "no left wall" word found in original maps
+    comp_default = CellComponent.from_raw_word(ComponentType.LEFT_WALL, 0x0001)
+    assert comp_default.is_present is False
 
     # 0x8182: present, group=2 (ssnow1), frame=3
     comp_target = CellComponent.from_raw_word(ComponentType.FLOOR, 0x8182)
@@ -126,15 +135,15 @@ def test_floor_empty_and_surface_unpacking():
     assert comp_target.tileset_group_index == 2
     assert comp_target.sprite_frame_index == 3
 
-    # 0xFF93: present, group=19, frame=255
-    comp_mask = CellComponent.from_raw_word(ComponentType.FLOOR, 0xFF93)
-    assert comp_mask.is_present is True
-    assert comp_mask.tileset_group_index == 19
-    assert comp_mask.sprite_frame_index == 255
+    # 0x9325: present, group=37 (snwtree1 in Airfield.set), frame=38
+    comp_tree = CellComponent.from_raw_word(ComponentType.CLUTTER, 0x9325)
+    assert comp_tree.is_present is True
+    assert comp_tree.tileset_group_index == 37
+    assert comp_tree.sprite_frame_index == 38
 
 
-def test_tileset_global_clutter_and_winter_snow_resolution():
-    """Validates winter snow replacement on surface 0 and GLOBAL_CLUTTER resolution."""
+def test_tileset_global_object_resolution():
+    """Validates that engine built-in archives follow the .set entries in the flat registry."""
     ts = TilesetDefinition(
         name="Airfield",
         surfaces=["sgrass", "shill", "ssnow1", "sdirt"],
@@ -143,23 +152,28 @@ def test_tileset_global_clutter_and_winter_snow_resolution():
         clutter=["snwtree1", "crock4"],
     )
 
-    # In winter tileset containing ssnow1, surface 0 (sgrass) resolves to ssnow1
-    assert ts.resolve_asset(ComponentType.FLOOR, 0) == "ssnow1"
-    assert ts.resolve_asset(ComponentType.FLOOR, 1) == "shill"
-    assert ts.resolve_asset(ComponentType.FLOOR, 2) == "ssnow1"
-    assert ts.resolve_asset(ComponentType.FLOOR, 3) == "sdirt"
+    # Surface 0 is never substituted, even when the set contains snow
+    assert ts.resolve_flat_asset(0) == "sgrass"
+    assert ts.resolve_flat_asset(2) == "ssnow1"
+    assert ts.resolve_flat_asset(7) == "crock4"
 
-    # Clutter from tileset
-    assert ts.resolve_asset(ComponentType.CLUTTER, 0) == "snwtree1"
-    assert ts.resolve_asset(ComponentType.CLUTTER, 1) == "crock4"
-
-    # Global clutter extension (group_idx >= 2)
-    assert ts.resolve_asset(ComponentType.CLUTTER, 2) == "People"
-    assert ts.resolve_asset(ComponentType.CLUTTER, 3) == "Can"
-    assert ts.resolve_asset(ComponentType.CLUTTER, 4) == "Turret"
-    assert ts.resolve_asset(ComponentType.CLUTTER, 5) == "Token"
-    assert ts.resolve_asset(ComponentType.CLUTTER, 6) == "Specials"
-    assert ts.resolve_asset(ComponentType.CLUTTER, 7) == "Cgendam"
-    assert ts.resolve_asset(ComponentType.CLUTTER, 8) == "Newtree1"
+    # Built-in archives in tileset loader order (SAW_TD sub_443D4A)
+    assert ts.resolve_flat_asset(8) == "Cgendam"
+    assert ts.resolve_flat_asset(9) == "Can"
+    assert ts.resolve_flat_asset(10) == "Token"
+    assert ts.resolve_flat_asset(11) == "People"
+    assert ts.resolve_flat_asset(12) == "Turret"
+    assert ts.resolve_flat_asset(13) is None
 
 
+def test_roof_cutoff_layer_from_flags():
+    """Validates extraction of the floor cover level from flags bits 18..20."""
+    comp = CellComponent.from_raw_word(ComponentType.FLOOR, 0x8182)
+    empty = CellComponent.from_raw_word(ComponentType.CLUTTER, 0)
+
+    def cell_with_flags(flags: int) -> MapCell:
+        return MapCell(x=0, y=0, z=0, floor=comp, left_wall=empty, right_wall=empty, clutter=empty, flags=flags)
+
+    assert cell_with_flags(0x001F0000).roof_cutoff_layer == 7
+    assert cell_with_flags(0x00130000).roof_cutoff_layer == 4
+    assert cell_with_flags(0x00070000).roof_cutoff_layer == 1

@@ -30,47 +30,51 @@ Use **Python 3.12** with **Arcade 3.3.1** as the primary hardware-accelerated re
 - Analysis of `Research/SSI/Soldiers at War/Single_g/Airfield.map` demonstrates gzip compression starting with magic bytes `1F 8B 08 00`.
 - Decompressing `Airfield.map` yields exactly `1,214,559` bytes.
 - The decompressed stream begins with:
-  - `0x15 0x00`: 16-bit integer version `21` (also supports v20 as per decompiled `sub_445F25` / `sub_4471BC` in `SAW_TD_NOTES.c`).
+  - `0x15 0x00`: 16-bit integer version `21` (also supports v20 as per decompiled `sub_445F25` / `sub_4471BC` in `SAW_TD_NOTES.c`; `Menu/Demo.MAP` is v19 with the same header and tile layout).
   - `AMB_MAP\0`: 8-byte ASCII null-terminated identifier.
-  - 128-byte map title string buffer (e.g. `"Airfield"`).
-  - 49 bytes of header parameters (flags, coordinates, layer counts).
+  - 128-byte tileset name string buffer (e.g. `"Airfield"`); the engine opens `Sets/<name>.set` from it.
+  - 55 bytes of editor state (cursor, scroll, brush, view level), giving a 193-byte header.
   - 3D Tile Array: 7 vertical layers $\times$ 100 rows $\times$ 130 columns $\times$ 13 bytes per cell = `1,183,000` bytes.
   - Followed by entity placement tables and canister records.
 
 ### Decision
 Implement `MapReader` in `saw_map.formats.map_reader`:
 1. Check first 2 bytes for gzip header (`1F 8B`); if present, decompress in-memory; otherwise treat as raw stream.
-2. Validate version (`20` or `21`) and signature string `AMB_MAP`.
-3. Support dynamic dimension bounds (extracted from companion `.txt` mission file or header bounding flags) up to the maximum 130 columns $\times$ 100 rows $\times$ 7 layers.
+2. Validate version (`19`, `20` or `21`) and signature string `AMB_MAP`.
+3. Support dynamic dimension bounds (extracted from the companion `.txt` mission file) up to the maximum 130 columns $\times$ 100 rows $\times$ 7 layers. The declared $W \times H$ area is centered inside the stored grid; cells keep absolute grid coordinates.
 4. Emit diagnostic logs documenting all discovered header fields for reverse-engineering validation.
 
 ### Alternatives Considered
 - Hardcoding static gzip-only: Rejected because modded or extracted maps might already be decompressed.
 - Assuming fixed 100x100 bounds: Rejected because engine accommodates 20x20 up to 130x100.
 
+> **Correction (2026-10-11)**: The header was first measured as 187 bytes. Recounting the read calls of `sub_445F25` gives 193 bytes; the 6-byte error scrambled every cell field and led to several wrong intermediate theories. See `REVERSE_ENGINEERING_INFO.md` §2.2 and §3.8.
+
 ---
 
 ## 3. Tile Structure & Bitfield Decoding
 
 ### Empirical Findings
-In decompiled `SAW_TD_NOTES.c` (`sub_445F25` and `sub_451610`):
+In decompiled `SAW_TD_NOTES.c` (`sub_445F25`, `sub_4508F9` and `sub_451610`):
 - Each cell contains 13 bytes:
   - Word 0 (2 bytes): Floor / Ground surface.
   - Word 1 (2 bytes): Left wall.
   - Word 2 (2 bytes): Right wall.
   - Word 3 (2 bytes): Clutter / Object / Cover.
-  - Byte 4 (1 byte): Elevation / surface attribute.
-  - Dword 5 (4 bytes): Flags / visibility / occlusion words.
-- In `sub_451610` and `sub_4447D5`, component words are unpacked as follows:
+  - Byte 4 (1 byte): Unknown attribute (`0xFF` / `0x00`).
+  - Dword 5 (4 bytes): Flags; bits 18–20 hold the floor cover level.
+- In `sub_4508F9`, component words are unpacked and passed to `sub_451610` as follows:
   - **Presence / Visibility**: `(word >> 15) & 1` (bit 15 set = active component).
-  - **Tileset Group Index**: `(word >> 7) & 0xFF` (bits 7–14 point to index in the active `.set` file).
-  - **Sprite Frame Index**: `word & 0x7F` (bits 0–6 point to the sprite index in the referenced `.obj` file).
+  - **Sprite Frame Index**: `(word >> 7) & 0xFF` (bits 7–14 point to the frame in the referenced `.obj` file).
+  - **Object Group Index**: `word & 0x7F` (bits 0–6 index the flat registry built from the active `.set` file).
+- A floor is drawn only while its cover level is greater than the active view level.
 
 ### Decision
 Implement `CellComponent` and `MapCell` data structures in `saw_map.maps.model`:
-- Parse each 16-bit component word using `(word >> 15) & 1`, `(word >> 7) & 0xFF`, and `word & 0x7F`.
+- Parse each 16-bit component word using `(word >> 15) & 1` (presence), `(word >> 7) & 0xFF` (frame), and `word & 0x7F` (group).
 - Maintain clean representation of all four components per coordinate: `floor`, `left_wall`, `right_wall`, `clutter`.
-- Log diagnostic warnings whenever a non-zero word has bit 15 cleared or an out-of-range tileset index.
+- Resolve every group index through the flat registry (`.set` entries in file order, then the built-in archives `Cgendam`, `Can`, `Token`, `People`, `Turret`).
+- A non-zero word with bit 15 cleared is normal (`0x0001` is the usual absent left wall) and is treated as absent.
 
 ---
 
@@ -90,7 +94,8 @@ Implement `CellComponent` and `MapCell` data structures in `saw_map.maps.model`:
   ...
   snwtree1
   ```
-- Line 5 contains 4 counts: Surfaces (13), Left walls (12), Right walls (12), Clutter (28).
+- The count line contains 4 counts: Surfaces (13), Left walls (12), Right walls (12), Clutter (28). It may carry a trailing `#` comment (`Messina.set`).
+- The set belonging to a map is named by the 128-byte string in the map header.
 - Each name corresponds directly to an `.obj` archive in `Research/SSI/Soldiers at War/Obj/<name>.obj`.
 - Category prefixes:
   - `s*` = Ground Surface / Floor.
@@ -141,8 +146,9 @@ Implement `SpriteReader` in `saw_map.formats.sprite_reader` and `PaletteReader` 
 
 ### Mathematical Model
 In Soldiers at War, the grid uses a diamond dimetric isometric orientation:
-- Standard Tile Dimensions: Width $T_w \approx 64$ pixels, Height $T_h \approx 32$ pixels (2:1 aspect ratio).
-- Elevation step: Vertical displacement $E_{step} \approx 16$ or $24$ pixels per layer $Z$.
+- Standard Tile Dimensions: Width $T_w = 128$ pixels, Height $T_h = 64$ pixels (2:1 aspect ratio).
+- Elevation step: Vertical displacement $E_{step} = 48$ pixels per layer $Z$.
+- Sprite frames are anchored relative to the reference point $(209, 322)$ stored in their headers.
 - **World to Screen**:
   $$X_{screen} = (X - Y) \times \frac{T_w}{2}$$
   $$Y_{screen} = (X + Y) \times \frac{T_h}{2} - Z \times E_{step}$$
@@ -172,3 +178,4 @@ Implement `DrawOrderStrategy` in `saw_map.rendering.draw_order`:
 - Sort key: `(layer_z, x + y, component_priority, y)`
   - `component_priority`: Floor (0) $\rightarrow$ Left Wall (1) $\rightarrow$ Right Wall (2) $\rightarrow$ Clutter (3).
 - Supports filtering: skip any layer above `max_visible_layer` or any disabled component category.
+- Applies the engine's floor cover rule: a floor whose cover level is $\le$ the visible level is skipped (not applied in single-layer isolation).

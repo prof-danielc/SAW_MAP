@@ -1,6 +1,6 @@
 """Binary parser for Soldiers at War map documents (.map).
 
-Supports gzip and uncompressed containers, version 20 and 21 AMB_MAP headers,
+Supports gzip and uncompressed containers, version 19, 20 and 21 AMB_MAP headers,
 and 3D cell array extraction across 7 vertical elevation layers.
 """
 
@@ -12,7 +12,13 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 from saw_map.diagnostics.logger import get_logger
-from saw_map.maps.model import CellComponent, ComponentType, MapCell, MapDocument
+from saw_map.maps.model import (
+    SUPPORTED_MAP_VERSIONS,
+    CellComponent,
+    ComponentType,
+    MapCell,
+    MapDocument,
+)
 
 logger = get_logger("formats.map_reader")
 
@@ -22,7 +28,11 @@ EXPECTED_LAYERS = 7
 GRID_MAX_WIDTH = 130
 GRID_MAX_HEIGHT = 100
 CELL_BYTE_SIZE = 13
-HEADER_ARRAY_OFFSET = 187
+CELLS_PER_LAYER = GRID_MAX_WIDTH * GRID_MAX_HEIGHT
+PRESENCE_BIT = 0x8000
+GROUP_MASK = 0x7F
+# version (2) + signature (8) + tileset name (128) + 55 bytes of editor/view state
+HEADER_ARRAY_OFFSET = 193
 
 
 class MapReader:
@@ -46,13 +56,13 @@ class MapReader:
                     if len(decomp) >= 10:
                         ver = struct.unpack("<H", decomp[:2])[0]
                         sig = decomp[2:9]
-                        return ver in (20, 21) and sig == AMB_SIGNATURE
+                        return str(ver) in SUPPORTED_MAP_VERSIONS and sig == AMB_SIGNATURE
                 return False
             else:
                 if len(head) >= 10:
                     ver = struct.unpack("<H", head[:2])[0]
                     sig = head[2:9]
-                    return ver in (20, 21) and sig == AMB_SIGNATURE
+                    return str(ver) in SUPPORTED_MAP_VERSIONS and sig == AMB_SIGNATURE
         except Exception:
             return False
 
@@ -109,9 +119,9 @@ class MapReader:
             raise ValueError(
                 f"Invalid map signature: {signature!r}. Expected {AMB_SIGNATURE!r}"
             )
-        if version_str not in ("20", "21"):
+        if version_str not in SUPPORTED_MAP_VERSIONS:
             raise ValueError(
-                f"Unsupported map version: {version_str}. Expected 20 or 21."
+                f"Unsupported map version: {version_str}. Expected 19, 20 or 21."
             )
 
         title_raw = data[10:138]
@@ -120,16 +130,10 @@ class MapReader:
             title = path.stem
         logger.debug(f"Map header verified: version={version_str}, title='{title}'")
 
-        # Discover active dimensions (check companion .txt first if available)
-        width, height = cls._discover_dimensions(path, override_width, override_height)
-        logger.info(f"Loaded map '{title}': active dimensions {width}x{height} (max 130x100x7)")
-
         # Parse 3D cell array
         # Array dimensions: 7 layers x 100 rows x 130 columns x 13 bytes
-        cells: Dict[Tuple[int, int, int], MapCell] = {}
         tile_start = HEADER_ARRAY_OFFSET
-        total_cells = EXPECTED_LAYERS * GRID_MAX_HEIGHT * GRID_MAX_WIDTH
-        required_bytes = total_cells * CELL_BYTE_SIZE
+        required_bytes = CELLS_PER_LAYER * EXPECTED_LAYERS * CELL_BYTE_SIZE
 
         if len(data) < tile_start + required_bytes:
             raise ValueError(
@@ -137,35 +141,39 @@ class MapReader:
                 f"got {len(data):,} bytes"
             )
 
-        # Unpack cells into coordinate dictionary
+        raw_cells = list(struct.iter_unpack("<HHHHBI", data[tile_start : tile_start + required_bytes]))
+
+        # Discover the playable window (companion .txt dimensions and stored content)
+        mission_lines = cls._read_mission_lines(path)
+        origin_x, origin_y, width, height = cls._discover_active_window(
+            raw_cells, mission_lines, override_width, override_height
+        )
+        logger.info(
+            f"Loaded map '{path.stem}' (tileset '{title}'): active window {width}x{height} "
+            f"at ({origin_x}, {origin_y}) (max 130x100x7)"
+        )
+
+        # Unpack cells of the playable window into coordinate dictionary
+        cells: Dict[Tuple[int, int, int], MapCell] = {}
         for z in range(EXPECTED_LAYERS):
-            for y in range(height):
-                for x in range(width):
-                    idx = (z * GRID_MAX_HEIGHT * GRID_MAX_WIDTH) + (y * GRID_MAX_WIDTH) + x
-                    cell_offset = tile_start + (idx * CELL_BYTE_SIZE)
-                    chunk = data[cell_offset : cell_offset + CELL_BYTE_SIZE]
-
-                    w0, w1, w2, w3, b4, dw5 = struct.unpack("<HHHHBI", chunk)
-
-                    floor = CellComponent.from_raw_word(ComponentType.FLOOR, w0)
-                    left_wall = CellComponent.from_raw_word(ComponentType.LEFT_WALL, w1)
-                    right_wall = CellComponent.from_raw_word(ComponentType.RIGHT_WALL, w2)
-                    clutter = CellComponent.from_raw_word(ComponentType.CLUTTER, w3)
-
-                    cell = MapCell(
+            for y in range(origin_y, origin_y + height):
+                row_start = (z * CELLS_PER_LAYER) + (y * GRID_MAX_WIDTH)
+                for x in range(origin_x, origin_x + width):
+                    w0, w1, w2, w3, b4, dw5 = raw_cells[row_start + x]
+                    cells[(x, y, z)] = MapCell(
                         x=x,
                         y=y,
                         z=z,
-                        floor=floor,
-                        left_wall=left_wall,
-                        right_wall=right_wall,
-                        clutter=clutter,
+                        floor=CellComponent.from_raw_word(ComponentType.FLOOR, w0),
+                        left_wall=CellComponent.from_raw_word(ComponentType.LEFT_WALL, w1),
+                        right_wall=CellComponent.from_raw_word(ComponentType.RIGHT_WALL, w2),
+                        clutter=CellComponent.from_raw_word(ComponentType.CLUTTER, w3),
                         elevation_attr=b4,
                         flags=dw5,
                     )
-                    cells[(x, y, z)] = cell
 
-        tileset_names = [title] if title else [path.stem]
+        # The header string names the companion tileset (Sets/<title>.set)
+        tileset_names = [title]
 
         return MapDocument(
             title=title,
@@ -175,40 +183,140 @@ class MapReader:
             layer_count=EXPECTED_LAYERS,
             tileset_names=tileset_names,
             cells=cells,
+            name=path.stem,
+            mission_text=cls._extract_mission_text(mission_lines),
+            origin_x=origin_x,
+            origin_y=origin_y,
         )
 
     @staticmethod
-    def _discover_dimensions(
-        map_path: Path,
-        override_w: Optional[int],
-        override_h: Optional[int],
-    ) -> Tuple[int, int]:
-        """Discovers active grid dimensions from parameters or companion mission .txt file."""
-        if override_w is not None and override_h is not None:
-            if 20 <= override_w <= GRID_MAX_WIDTH and 20 <= override_h <= GRID_MAX_HEIGHT:
-                return (override_w, override_h)
-
-        # Check for companion .txt in same directory
+    def _read_mission_lines(map_path: Path) -> List[str]:
+        """Reads the non-empty lines of the companion mission .txt file, if present."""
         companion_txt = map_path.with_suffix(".txt")
         if not companion_txt.is_file():
             # Check case-insensitive
-            parent = map_path.parent
-            for f in parent.glob("*.txt"):
+            for f in map_path.parent.glob("*.txt"):
                 if f.stem.lower() == map_path.stem.lower():
                     companion_txt = f
                     break
 
-        if companion_txt.is_file():
-            try:
-                lines = [l.strip() for l in companion_txt.read_text(encoding="latin-1").splitlines() if l.strip()]
-                # Typically the 2nd and 3rd lines from the end are width and height
-                if len(lines) >= 3:
-                    cand_w = int(lines[-3])
-                    cand_h = int(lines[-2])
-                    if 20 <= cand_w <= GRID_MAX_WIDTH and 20 <= cand_h <= GRID_MAX_HEIGHT:
-                        return (cand_w, cand_h)
-            except Exception:
-                pass
+        if not companion_txt.is_file():
+            return []
+        try:
+            text = companion_txt.read_text(encoding="latin-1")
+        except OSError as exc:
+            logger.warning(f"Could not read companion mission file {companion_txt.name}: {exc}")
+            return []
+        return [line.strip() for line in text.splitlines() if line.strip()]
 
-        # Default standard map size
-        return (GRID_MAX_WIDTH, GRID_MAX_HEIGHT)
+    @staticmethod
+    def _extract_mission_text(mission_lines: List[str]) -> str:
+        """Returns the briefing text preceding the '<index> : <status>' objective lines."""
+        briefing: List[str] = []
+        for line in mission_lines:
+            head, sep, tail = line.partition(":")
+            if sep and head.strip().isdigit() and tail.strip().isdigit():
+                break
+            briefing.append(line)
+        else:
+            # No objective block: drop the trailing width / height / seed integers
+            while briefing and briefing[-1].isdigit():
+                briefing.pop()
+        return "\n".join(briefing)
+
+    @staticmethod
+    def _declared_dimensions(mission_lines: List[str]) -> Optional[Tuple[int, int]]:
+        """Reads the playable width and height from the trailing integers of the mission file.
+
+        The file ends with width, height, and a seed (version 21), or with width and
+        height only (version 19 Demo map).
+        """
+        trailing: List[int] = []
+        for line in reversed(mission_lines):
+            if not line.isdigit():
+                break
+            trailing.insert(0, int(line))
+
+        if len(trailing) >= 3:
+            cand_w, cand_h = trailing[-3], trailing[-2]
+        elif len(trailing) == 2:
+            cand_w, cand_h = trailing
+        else:
+            return None
+        if 20 <= cand_w <= GRID_MAX_WIDTH and 20 <= cand_h <= GRID_MAX_HEIGHT:
+            return (cand_w, cand_h)
+        return None
+
+    @staticmethod
+    def _content_bounds(raw_cells: List[Tuple[int, ...]]) -> Optional[Tuple[int, int, int, int]]:
+        """Computes the (min_x, min_y, max_x, max_y) bounds of authored map content.
+
+        Cells outside the playable window only hold the editor's default ground fill
+        (a layer-0 floor of surface group 0), which is not counted as content.
+        """
+        min_x, min_y, max_x, max_y = GRID_MAX_WIDTH, GRID_MAX_HEIGHT, -1, -1
+        for idx, (w0, w1, w2, w3, _, _) in enumerate(raw_cells):
+            has_content = (w1 | w2 | w3) & PRESENCE_BIT or (
+                w0 & PRESENCE_BIT and (w0 & GROUP_MASK or idx >= CELLS_PER_LAYER)
+            )
+            if not has_content:
+                continue
+            y, x = divmod(idx % CELLS_PER_LAYER, GRID_MAX_WIDTH)
+            if x < min_x:
+                min_x = x
+            if x > max_x:
+                max_x = x
+            if y < min_y:
+                min_y = y
+            if y > max_y:
+                max_y = y
+
+        if max_x < 0:
+            return None
+        return (min_x, min_y, max_x, max_y)
+
+    @classmethod
+    def _discover_active_window(
+        cls,
+        raw_cells: List[Tuple[int, ...]],
+        mission_lines: List[str],
+        override_w: Optional[int],
+        override_h: Optional[int],
+    ) -> Tuple[int, int, int, int]:
+        """Determines the playable window as (origin_x, origin_y, width, height).
+
+        The engine centers a W x H playable area inside the fixed 130x100 grid. W and H
+        come from the explicit overrides or the companion mission .txt file. Content
+        stored outside that window (leftovers of maps authored at a larger size, such
+        as Mansion and Normandy) is not part of the playable map.
+
+        Without declared dimensions, the bounds of the authored content are used
+        instead (heuristic), falling back to the full grid.
+        """
+        dims: Optional[Tuple[int, int]] = None
+        if (
+            override_w is not None
+            and override_h is not None
+            and 20 <= override_w <= GRID_MAX_WIDTH
+            and 20 <= override_h <= GRID_MAX_HEIGHT
+        ):
+            dims = (override_w, override_h)
+        else:
+            dims = cls._declared_dimensions(mission_lines)
+
+        if dims is not None:
+            width, height = dims
+            return ((GRID_MAX_WIDTH - width) // 2, (GRID_MAX_HEIGHT - height) // 2, width, height)
+
+        content = cls._content_bounds(raw_cells)
+        if content is not None:
+            min_x, min_y, max_x, max_y = content
+            width = max_x - min_x + 1
+            height = max_y - min_y + 1
+            if width >= 20 and height >= 20:
+                logger.debug(
+                    f"No declared map dimensions; using content bounds x {min_x}..{max_x}, y {min_y}..{max_y}"
+                )
+                return (min_x, min_y, width, height)
+
+        return (0, 0, GRID_MAX_WIDTH, GRID_MAX_HEIGHT)

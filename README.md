@@ -13,19 +13,22 @@ The tool parses original binary `.map` files, companion `.set` definitions, `.ob
   - **Pygame 2.6.1 (Fallback)**: CPU surface blitting fallback when OpenGL is unavailable or software rendering is preferred.
 - **Accurate Binary Format Parsing**:
   - Auto-detects Gzip-compressed (`1F 8B`) and raw uncompressed `.map` streams.
-  - Supports Engine v20 and v21 `AMB_MAP` headers (187 bytes).
-  - Unpacks 3D tile arrays across 7 vertical elevation layers ($Z = 0 \dots 6$), 100 rows ($Y$), and 130 columns ($X$) with 13-byte cell strides.
+  - Supports v19, v20 and v21 `AMB_MAP` streams (193-byte header).
+  - Unpacks 3D tile arrays across 7 vertical elevation layers ($Z = 0 \dots 6$), 100 rows ($Y$), and 130 columns ($X$) with 13-byte cell strides, and locates the playable window centered inside that grid.
+  - Resolves the tileset from the name stored in the map header, so custom maps built on generic sets load correctly.
   - Decompresses companion `.set` tileset partitions and `.obj`/`.spr` scanline RLE sprites.
 - **Interactive Viewport & Controls**:
-  - Smooth camera panning (WASD / Arrows / Mouse Drag) and fractional zoom (0.25x – 4.0x).
+  - Smooth camera panning (WASD / Arrows / Mouse Drag) and fractional zoom (0.25x – 4.0x), cursor-centered on the mouse wheel.
   - Slicing and isolation of elevation layers ($0 \dots 6$).
   - Per-component visibility filtering (Floors, Left Walls, Right Walls, Clutter/Objects).
+  - Engine-accurate floor culling: floors hidden under a higher level reappear as the view level is lowered.
   - Instant perspective toggling between Dimetric Isometric and 2D Top-Down.
   - Hot-swapping between daylight (`Win.pal`) and night/ambient (`Darkpal.col`) color palettes.
 - **Inspection Tools & Overlays**:
-  - **Tile Inspector Sidebar**: Real-time cell inspection displaying coordinates, elevation attribute, cell flags DWORD, and all 4 component slots (Roof/Ceiling/Mask, Left Wall, Right Wall, Ground Surface/Clutter) with raw 16-bit hex words, resolved asset names, and sprite frame indices.
+  - **Tile Inspector Sidebar**: Real-time cell inspection displaying coordinates, attribute byte, cell flags DWORD, and all 4 component slots (Floor/Surface, Left Wall, Right Wall, Clutter/Object) with raw 16-bit hex words, resolved asset names, and sprite frame indices.
+  - **Map Metadata Dialog**: Map name, version, dimensions, tileset partition counts, and the mission briefing text.
   - **Minimap Overlay**: Picture-in-picture 2D orthogonal tactical minimap featuring procedural terrain surface colors (snow, hangar stone, dirt, railroad tracks, wood, metal, grass) and interactive camera viewport diamond frustum.
-  - **Status HUD**: Real-time camera coordinates, zoom factor, active elevation layer, and rendering backend indicator.
+  - **Status HUD**: Map name and size, view perspective, active elevation layer, zoom factor, and the hovered cell with its primary tile.
 - **Strict Architecture Principles**:
   - Pure Python data models, format readers, and coordinate math are 100% decoupled from graphics engines.
   - Game assets in `Research/SSI/Soldiers at War/` are treated as strictly immutable and read-only.
@@ -102,8 +105,8 @@ The visualizer provides a unified set of controls across both the Arcade and Pyg
 | **Left Mouse Drag** | **Mouse Pan** | Click and drag the left mouse button to freely pan the view |
 | <kbd>+</kbd> / <kbd>=</kbd> / <kbd>Num +</kbd> | **Zoom In** | Increase magnification (up to 4.0x) |
 | <kbd>-</kbd> / <kbd>Num -</kbd> | **Zoom Out** | Decrease magnification (down to 0.25x) |
-| **Mouse Wheel** | **Scroll Zoom** | Scroll up to zoom in, scroll down to zoom out |
-| <kbd>Home</kbd> / <kbd>R</kbd> | **Reset View** | Reset camera position to map center and zoom to 1.0x |
+| **Mouse Wheel** | **Scroll Zoom** | Scroll up to zoom in, scroll down to zoom out, centered on the cursor |
+| <kbd>Home</kbd> / <kbd>R</kbd> | **Reset View** | Reset camera position to the center of the playable map and zoom to 1.0x |
 
 ### 2. Elevation Slicing & Layer Filtering
 
@@ -120,19 +123,20 @@ The visualizer provides a unified set of controls across both the Arcade and Pyg
 | <kbd>Tab</kbd> / <kbd>T</kbd> | **Toggle Perspective** | Switch between Dimetric Isometric (2:1 diamond) and 2D Top-Down |
 | <kbd>M</kbd> | **Toggle Minimap** | Show or hide picture-in-picture minimap overlay |
 | <kbd>I</kbd> | **Toggle Inspector** | Show or hide tile property sidebar |
+| <kbd>F1</kbd> / <kbd>H</kbd> | **Toggle Map Metadata** | Show or hide the map metadata and mission briefing dialog |
 | <kbd>P</kbd> | **Cycle Palette** | Switch between daylight (`Win.pal`) and night/ambient (`Darkpal.col`) |
 | <kbd>F11</kbd> / <kbd>F</kbd> | **Toggle Fullscreen / Maximize** | Toggle window between fullscreen and normal windowed mode |
-| **Left Mouse Click** | **Inspect Tile** | Select tile under cursor to inspect its layers and components in sidebar |
+| **Mouse Hover** | **Inspect Tile** | The tile under the cursor is highlighted and shown in the status bar and sidebar |
 | <kbd>Esc</kbd> | **Exit** | Close the application |
 
 ### 4. Structural Component Visibility Filters
 
 | Control | Action | Description |
 |---|---|---|
-| <kbd>1</kbd> | **Toggle Roofs / Ceilings** | Show or hide roof, ceiling, and upper cutaway components (`word0`) |
+| <kbd>1</kbd> | **Toggle Floors** | Show or hide floor and ground surface components (`word0`), including upper-level floors and roofs |
 | <kbd>2</kbd> | **Toggle Left Walls** | Show or hide left wall components (`word1`) |
 | <kbd>3</kbd> | **Toggle Right Walls** | Show or hide right wall components (`word2`) |
-| <kbd>4</kbd> | **Toggle Surface / Clutter** | Show or hide procedural ground surface and clutter components (`word3`) |
+| <kbd>4</kbd> | **Toggle Clutter / Objects** | Show or hide clutter and object components (`word3`) |
 
 ---
 
@@ -162,7 +166,7 @@ SAW_MAP/
 ├── tests/
 │   ├── contract/               # CLI argument & contract tests
 │   ├── integration/            # Multi-map loading & mouse picking tests
-│   └── unit/                   # RLE, bitfield, palette, camera, geometry unit tests
+│   └── unit/                   # RLE, bitfield, palette, camera, geometry, input unit tests
 ├── REVERSE_ENGINEERING_INFO.md # Comprehensive reverse-engineering reference
 ├── run_viewer.py               # Root quickstart execution script
 ├── pyproject.toml              # Project metadata & build configuration
@@ -174,7 +178,7 @@ SAW_MAP/
 ## Reverse Engineering Documentation
 
 Detailed reverse-engineering documentation, disassembly analyses from `SAW_TD_NOTES.c`, opcode tables, and memory structures are documented in:
-- [`REVERSE_ENGINEERING_INFO.md`](REVERSE_ENGINEERING_INFO.md) — Comprehensive reverse-engineering knowledge base covering the Lupine/Ordoor engine, decompression, 13-byte cell bitmasks, scanline RLE, and post-tile array mission records.
+- [`REVERSE_ENGINEERING_INFO.md`](REVERSE_ENGINEERING_INFO.md) — Comprehensive reverse-engineering knowledge base covering the Lupine/Ordoor engine, decompression, the 193-byte header, 13-byte cell bitmasks, the playable window, scanline RLE, and post-tile array mission records.
 - [`docs/formats.md`](docs/formats.md) — Specification tables for containers, headers, and coordinate transformations.
 
 ---
@@ -186,9 +190,10 @@ Run the full automated test suite with `pytest`:
 pytest tests/ -v
 ```
 
-All 45 automated tests verify:
-- Binary map parsing across multiple original maps (`Airfield`, `Cassino`, `Normandy`, `Mansion`).
-- Bitfield component unpacking and presence masks.
+The automated tests verify:
+- Binary map parsing across multiple original maps (`Airfield`, `Cassino`, `Normandy`, `Mansion`), and that every tile word of every shipped map references a valid tileset entry.
+- Input action dispatching, overlay text, and headless frame rendering on both backends.
+- Bitfield component unpacking, presence masks, and floor cover levels.
 - Forward and inverse dimetric isometric projection math with sub-pixel picking accuracy.
 - Scanline RLE decoding and alpha mask transparency.
 - Autodesk COL/PAL palette loading and RGBA image conversions.

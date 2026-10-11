@@ -19,19 +19,7 @@ class MinimapBounds:
     height: float
 
 
-@dataclass(slots=True)
-class CameraFrustumBounds:
-    """Position and size of camera viewport rectangle projected on minimap."""
-    x: float
-    y: float
-    width: float
-    height: float
-
-
-def get_surface_color(
-    asset_name: Optional[str],
-    has_snow_context: bool = False,
-) -> Tuple[int, int, int]:
+def get_surface_color(asset_name: Optional[str]) -> Tuple[int, int, int]:
     """Maps a surface asset name to RGB color based on Soldiers at War surface classes."""
     if not asset_name:
         return (10, 12, 16)
@@ -39,9 +27,6 @@ def get_surface_color(
 
     # Snow surfaces (e.g. ssnow1, c_snow, etc.)
     if "snow" in name or "snw" in name:
-        return (210, 215, 220)
-    # Winter base maps default sgrass to snow color
-    if has_snow_context and ("grass" in name or name == "sgrass"):
         return (210, 215, 220)
 
     # Water & rivers
@@ -80,67 +65,51 @@ def generate_minimap_image(
     tileset: Optional[TilesetDefinition] = None,
     active_layer: Optional[int] = None,
 ) -> Image.Image:
-    """Generates a 2D top-down orthogonal RGB PIL image of the map terrain."""
+    """Generates a 2D top-down orthogonal RGBA PIL image of the playable map window."""
     w = max(1, map_doc.width)
     h = max(1, map_doc.height)
     img = Image.new("RGBA", (w, h), (10, 12, 16, 255))
 
-    has_snow = bool(tileset and any("snow" in s.lower() for s in tileset.surfaces))
     max_z = active_layer if active_layer is not None else (map_doc.layer_count - 1)
 
-    for y in range(h):
-        for x in range(w):
+    for py in range(h):
+        for px in range(w):
+            # Image pixels are relative to the playable window origin
+            x = map_doc.origin_x + px
+            y = map_doc.origin_y + py
             color: Optional[Tuple[int, int, int]] = None
-            cell0 = map_doc.get_cell(x, y, 0)
-            if cell0:
-                # w3 (clutter) stores procedural ground surface
-                if cell0.clutter.is_present and cell0.clutter.sprite_frame_index < 200:
-                    asset = tileset.resolve_flat_asset(cell0.clutter.tileset_group_index) if tileset else None
-                    color = get_surface_color(asset, has_snow_context=has_snow)
-                elif cell0.floor.is_present and cell0.floor.sprite_frame_index < 200:
-                    asset = tileset.resolve_flat_asset(cell0.floor.tileset_group_index) if tileset else None
-                    color = get_surface_color(asset, has_snow_context=has_snow)
-
-            # Check if any layer up to active layer has walls or clutter objects (planes, trees, vehicles)
             object_color: Optional[Tuple[int, int, int]] = None
+
             for z in range(max_z + 1):
-                cell_z = map_doc.get_cell(x, y, z)
-                if not cell_z:
+                cell = map_doc.get_cell(x, y, z)
+                if not cell:
                     continue
-                if cell_z.has_clutter_object and tileset:
-                    c_asset = tileset.resolve_flat_asset(cell_z.clutter_object_group)
-                    if c_asset:
-                        c_low = c_asset.lower()
-                        if "plane" in c_low:
-                            object_color = (130, 140, 155)  # German transport aircraft
-                            break
-                        elif "tree" in c_low:
-                            object_color = (35, 75, 30)  # Evergreen winter trees
-                            break
-                        elif any(k in c_low for k in ("vehic", "gun", "filler", "wrhouse", "sandbag")):
-                            object_color = (65, 70, 75)  # Military vehicles and installations
-                            break
-                if (
-                    cell_z.left_wall.is_present
-                    or cell_z.right_wall.is_present
-                    or (cell_z.floor.is_present and 13 <= cell_z.floor.tileset_group_index <= 36)
-                ):
+
+                # Ground color comes from the lowest floor (word 0) in the column
+                if color is None and cell.floor.is_present:
+                    asset = tileset.resolve_flat_asset(cell.floor.tileset_group_index) if tileset else None
+                    color = get_surface_color(asset)
+
+                # Clutter objects (word 3) and walls (words 1-2) override the ground color
+                if cell.clutter.is_present and tileset:
+                    c_asset = tileset.resolve_flat_asset(cell.clutter.tileset_group_index)
+                    c_low = c_asset.lower() if c_asset else ""
+                    if "plane" in c_low:
+                        object_color = (130, 140, 155)  # Aircraft
+                        break
+                    elif "tree" in c_low:
+                        object_color = (35, 75, 30)  # Trees
+                        break
+                    elif any(k in c_low for k in ("vehic", "gun", "filler", "wrhouse", "sandbag")):
+                        object_color = (65, 70, 75)  # Military vehicles and installations
+                        break
+                if cell.left_wall.is_present or cell.right_wall.is_present:
                     object_color = (45, 45, 50)  # Walls and fences
 
             if object_color is not None:
                 color = object_color
-            elif color is None:
-                for z in range(1, max_z + 1):
-                    cell_z = map_doc.get_cell(x, y, z)
-                    if cell_z and cell_z.clutter.is_present and cell_z.clutter.sprite_frame_index < 200:
-                        asset = tileset.resolve_flat_asset(cell_z.clutter.tileset_group_index) if tileset else None
-                        color = get_surface_color(asset, has_snow_context=has_snow)
-                        break
-
             if color is not None:
-                img.putpixel((x, y), (*color, 255))
-            else:
-                img.putpixel((x, y), (10, 12, 16, 255))
+                img.putpixel((px, py), (*color, 255))
 
     return img
 
@@ -172,40 +141,6 @@ class MinimapCalculator:
             width=self.box_width,
             height=self.box_height,
         )
-
-    def calculate_camera_frustum(
-        self,
-        map_doc: MapDocument,
-        camera: Camera,
-        screen_w: float,
-        screen_h: float,
-    ) -> CameraFrustumBounds:
-        """Calculates camera viewport indicator box on the minimap."""
-        inner_w = self.box_width - 16.0
-        inner_h = self.box_height - 28.0
-
-        map_w = max(1.0, float(map_doc.width))
-        map_h = max(1.0, float(map_doc.height))
-
-        scale_x = inner_w / map_w
-        scale_y = inner_h / map_h
-
-        visible_world_w = (screen_w / camera.zoom) / 64.0
-        visible_world_h = (screen_h / camera.zoom) / 32.0
-
-        frustum_w = max(4.0, visible_world_w * scale_x)
-        frustum_h = max(4.0, visible_world_h * scale_y)
-
-        center_grid_x = (-camera.x / 64.0) + (map_w / 2.0)
-        center_grid_y = (-camera.y / 32.0) + (map_h / 2.0)
-
-        fx = center_grid_x * scale_x - (frustum_w / 2.0)
-        fy = center_grid_y * scale_y - (frustum_h / 2.0)
-
-        fx = max(0.0, min(inner_w - frustum_w, fx))
-        fy = max(0.0, min(inner_h - frustum_h, fy))
-
-        return CameraFrustumBounds(x=fx, y=fy, width=frustum_w, height=frustum_h)
 
     def calculate_viewport_polygon(
         self,
@@ -255,6 +190,10 @@ class MinimapCalculator:
             else:
                 gx = world_sx / 32.0
                 gy = world_sy / 32.0
+
+            # Minimap pixels are relative to the playable window origin
+            gx -= map_doc.origin_x
+            gy -= map_doc.origin_y
 
             px = frame_x + (gx / map_w) * frame_w
             if invert_y:

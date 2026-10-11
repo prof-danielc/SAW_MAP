@@ -21,10 +21,51 @@ from saw_map.rendering.backend_base import IRenderer
 from saw_map.rendering.draw_order import DrawOrderStrategy, RenderItem
 from saw_map.rendering.fallback import create_placeholder_sprite
 from saw_map.viewer.camera import Camera, ViewPerspective
+from saw_map.viewer.input_handler import InputAction, InputHandler
 from saw_map.viewer.inspector import CellInspector
 from saw_map.viewer.minimap import MinimapCalculator, generate_minimap_image
+from saw_map.viewer.overlays import OverlayModel
 
 logger = get_logger("rendering.arcade")
+
+# Arcade key symbol -> semantic input action
+_KEY_ACTIONS: Dict[int, InputAction] = {
+    arcade.key.LEFT: InputAction.PAN_LEFT,
+    arcade.key.A: InputAction.PAN_LEFT,
+    arcade.key.RIGHT: InputAction.PAN_RIGHT,
+    arcade.key.D: InputAction.PAN_RIGHT,
+    arcade.key.UP: InputAction.PAN_UP,
+    arcade.key.W: InputAction.PAN_UP,
+    arcade.key.DOWN: InputAction.PAN_DOWN,
+    arcade.key.S: InputAction.PAN_DOWN,
+    arcade.key.EQUAL: InputAction.ZOOM_IN,
+    arcade.key.PLUS: InputAction.ZOOM_IN,
+    arcade.key.NUM_ADD: InputAction.ZOOM_IN,
+    arcade.key.MINUS: InputAction.ZOOM_OUT,
+    arcade.key.UNDERSCORE: InputAction.ZOOM_OUT,
+    arcade.key.NUM_SUBTRACT: InputAction.ZOOM_OUT,
+    arcade.key.HOME: InputAction.RESET_VIEW,
+    arcade.key.R: InputAction.RESET_VIEW,
+    arcade.key.PAGEUP: InputAction.ELEVATION_UP,
+    arcade.key.E: InputAction.ELEVATION_UP,
+    arcade.key.PAGEDOWN: InputAction.ELEVATION_DOWN,
+    arcade.key.Q: InputAction.ELEVATION_DOWN,
+    arcade.key.L: InputAction.TOGGLE_LAYER_ISOLATION,
+    arcade.key.TAB: InputAction.TOGGLE_PERSPECTIVE,
+    arcade.key.T: InputAction.TOGGLE_PERSPECTIVE,
+    arcade.key.M: InputAction.TOGGLE_MINIMAP,
+    arcade.key.I: InputAction.TOGGLE_SIDEBAR,
+    arcade.key.F1: InputAction.TOGGLE_METADATA,
+    arcade.key.H: InputAction.TOGGLE_METADATA,
+    arcade.key.KEY_1: InputAction.TOGGLE_FLOORS,
+    arcade.key.KEY_2: InputAction.TOGGLE_LEFT_WALLS,
+    arcade.key.KEY_3: InputAction.TOGGLE_RIGHT_WALLS,
+    arcade.key.KEY_4: InputAction.TOGGLE_CLUTTER,
+    arcade.key.P: InputAction.CYCLE_PALETTE,
+    arcade.key.F11: InputAction.TOGGLE_FULLSCREEN,
+    arcade.key.F: InputAction.TOGGLE_FULLSCREEN,
+    arcade.key.ESCAPE: InputAction.EXIT,
+}
 
 
 class ArcadeWindow(arcade.Window):
@@ -72,101 +113,25 @@ class ArcadeWindow(arcade.Window):
             self.renderer.camera.pan(dx / zoom, -dy / zoom)
 
     def on_mouse_scroll(self, x: int, y: int, scroll_x: int, scroll_y: int) -> None:
-        """Zooms camera centered on view."""
-        if scroll_y > 0:
-            self.renderer.camera.zoom_in()
-        elif scroll_y < 0:
-            self.renderer.camera.zoom_out()
+        """Zooms camera centered on the cursor."""
+        if scroll_y == 0:
+            return
+        # Arcade reports Y from the bottom edge; the camera model uses Y-down window pixels
+        self.renderer.input.handle_zoom_at_cursor(
+            scroll_y > 0, float(x), float(self.height - y), float(self.width), float(self.height)
+        )
+        self.renderer.update_hover(x, y, self.width, self.height)
 
     def on_key_press(self, symbol: int, modifiers: int) -> None:
-        """Handles keyboard navigation and diagnostic toggles."""
-        cam = self.renderer.camera
-
-        # Panning
-        step = 40.0 / cam.zoom
-        if symbol in (arcade.key.LEFT, arcade.key.A):
-            cam.pan(step, 0)
-        elif symbol in (arcade.key.RIGHT, arcade.key.D):
-            cam.pan(-step, 0)
-        elif symbol in (arcade.key.UP, arcade.key.W):
-            cam.pan(0, step)
-        elif symbol in (arcade.key.DOWN, arcade.key.S):
-            cam.pan(0, -step)
-
-        # Zooming
-        elif symbol in (arcade.key.EQUAL, arcade.key.PLUS):
-            cam.zoom_in()
-        elif symbol in (arcade.key.MINUS, arcade.key.UNDERSCORE):
-            cam.zoom_out()
-        elif symbol in (arcade.key.HOME, arcade.key.R):
-            self.renderer._update_map_center()
-            cam.zoom = 1.0
-            self.renderer.update_hover(int(self.mouse_screen_x), int(self.mouse_screen_y), self.width, self.height)
-
-        # Elevation Filtering (PageUp / PageDown / E / Q)
-        elif symbol in (arcade.key.PAGEUP, arcade.key.E):
-            cam.active_max_layer = min(6, cam.active_max_layer + 1)
-            cam.isolated_layer = None
-            self.renderer.rebuild_sprites()
-            self.renderer.update_hover(int(self.mouse_screen_x), int(self.mouse_screen_y), self.width, self.height)
-        elif symbol in (arcade.key.PAGEDOWN, arcade.key.Q):
-            cam.active_max_layer = max(0, cam.active_max_layer - 1)
-            cam.isolated_layer = None
-            self.renderer.rebuild_sprites()
-            self.renderer.update_hover(int(self.mouse_screen_x), int(self.mouse_screen_y), self.width, self.height)
-
-        # Single layer isolation mode toggle
-        elif symbol == arcade.key.L:
-            if cam.isolated_layer is None:
-                cam.isolated_layer = cam.active_max_layer
-            else:
-                cam.isolated_layer = None
-            self.renderer.rebuild_sprites()
-            self.renderer.update_hover(int(self.mouse_screen_x), int(self.mouse_screen_y), self.width, self.height)
-
-        # Perspectives (Tab / T)
-        elif symbol in (arcade.key.TAB, arcade.key.T):
-            if cam.perspective == ViewPerspective.ISOMETRIC:
-                cam.perspective = ViewPerspective.TOP_DOWN
-            else:
-                cam.perspective = ViewPerspective.ISOMETRIC
-            self.renderer._update_map_center()
-            self.renderer.rebuild_sprites()
-            self.renderer.update_hover(int(self.mouse_screen_x), int(self.mouse_screen_y), self.width, self.height)
-
-        # Minimap (M)
-        elif symbol == arcade.key.M:
-            cam.show_minimap = not cam.show_minimap
-
-        # Inspection Sidebar (I)
-        elif symbol == arcade.key.I:
-            cam.show_sidebar = not cam.show_sidebar
-
-        # Component Toggles (1=Floors, 2=Left walls, 3=Right walls, 4=Clutter)
-        elif symbol == arcade.key.KEY_1:
-            cam.show_floors = not cam.show_floors
-            self.renderer.rebuild_sprites()
-        elif symbol == arcade.key.KEY_2:
-            cam.show_left_walls = not cam.show_left_walls
-            self.renderer.rebuild_sprites()
-        elif symbol == arcade.key.KEY_3:
-            cam.show_right_walls = not cam.show_right_walls
-            self.renderer.rebuild_sprites()
-        elif symbol == arcade.key.KEY_4:
-            cam.show_clutter = not cam.show_clutter
-            self.renderer.rebuild_sprites()
-
-        # Palette Cycle (P)
-        elif symbol == arcade.key.P:
-            self.renderer.cycle_palette()
-
-        # Fullscreen / Maximize toggle (F11 / F)
-        elif symbol in (arcade.key.F11, arcade.key.F):
-            self.set_fullscreen(not self.fullscreen)
-
-        # Exit (Escape)
-        elif symbol == arcade.key.ESCAPE:
-            self.close()
+        """Translates key presses into InputActions handled by the shared InputHandler."""
+        action = _KEY_ACTIONS.get(symbol)
+        if action is None:
+            return
+        self.renderer.input.handle_action(action)
+        if action != InputAction.EXIT:
+            self.renderer.update_hover(
+                int(self.mouse_screen_x), int(self.mouse_screen_y), self.width, self.height
+            )
 
 
 class ArcadeRenderer(IRenderer):
@@ -191,8 +156,6 @@ class ArcadeRenderer(IRenderer):
         self.sprite_list = arcade.SpriteList()
         self._texture_cache: Dict[Tuple[str, int, str], Tuple[arcade.Texture, int, int]] = {}
         self.hovered_cell: Optional[Tuple[int, int, int]] = None
-        self.map_center_x: float = 0.0
-        self.map_center_y: float = 0.0
 
         # Cached Text object for status bar
         self._status_text_obj: Optional[arcade.Text] = None
@@ -210,6 +173,24 @@ class ArcadeRenderer(IRenderer):
         self._last_sidebar_key: Optional[Tuple] = None
         self._sidebar_title_obj: Optional[arcade.Text] = None
         self._sidebar_title_pos: Optional[Tuple[float, float]] = None
+
+        # Metadata dialog cached Text objects
+        self._metadata_texts: List[arcade.Text] = []
+        self._last_metadata_key: Optional[Tuple[int, int]] = None
+
+        self.input = InputHandler(
+            self.camera,
+            on_redraw_needed=self.rebuild_sprites,
+            on_recenter=self._update_map_center,
+            on_cycle_palette=self.cycle_palette,
+            on_toggle_fullscreen=self._toggle_fullscreen,
+            on_exit=self.close,
+        )
+
+    def _toggle_fullscreen(self) -> None:
+        """Toggles the window between fullscreen and windowed mode."""
+        if self.window:
+            self.window.set_fullscreen(not self.window.fullscreen)
 
     def initialize(
         self,
@@ -231,17 +212,12 @@ class ArcadeRenderer(IRenderer):
     def _update_map_center(self) -> None:
         """Computes center of the active map in world coordinates and centers camera."""
         if not self.map_doc:
-            self.map_center_x = 0.0
-            self.map_center_y = 0.0
             return
-        mid_x = self.map_doc.width / 2.0
-        mid_y = self.map_doc.height / 2.0
+        mid_x, mid_y = self.map_doc.center
         if self.camera.perspective == ViewPerspective.ISOMETRIC:
             sx, sy = self.iso_transform.world_to_screen(mid_x, mid_y, 0)
         else:
             sx, sy = self.top_transform.world_to_screen(mid_x, mid_y, 0)
-        self.map_center_x = sx
-        self.map_center_y = -sy
         self.camera.x = -sx
         self.camera.y = -sy
 
@@ -257,6 +233,8 @@ class ArcadeRenderer(IRenderer):
         self.asset_loader = asset_loader
         self.tileset = tileset
         self.palette = palette
+        self._minimap_texture = None
+        self._last_metadata_key = None
         self._update_map_center()
         self.rebuild_sprites()
 
@@ -396,6 +374,42 @@ class ArcadeRenderer(IRenderer):
             self._draw_minimap(win_w, win_h)
         if self.camera.show_sidebar:
             self._draw_sidebar(win_w, win_h)
+        if self.camera.show_metadata:
+            self._draw_metadata_dialog(win_w, win_h)
+
+    def _draw_metadata_dialog(self, win_w: int, win_h: int) -> None:
+        """Renders centered map metadata dialog (map, tileset, mission briefing)."""
+        panel_w = min(640.0, float(win_w) - 40.0)
+        panel_h = min(460.0, float(win_h) - 80.0)
+        if panel_w < 200.0 or panel_h < 100.0:
+            return
+        left = (float(win_w) - panel_w) / 2.0
+        bottom = (float(win_h) - panel_h) / 2.0
+        top = bottom + panel_h
+        arcade.draw_lrbt_rectangle_filled(left, left + panel_w, bottom, top, (15, 18, 22, 240))
+        arcade.draw_lrbt_rectangle_outline(left, left + panel_w, bottom, top, arcade.color.GOLD, 1)
+
+        key = (win_w, win_h)
+        if key != self._last_metadata_key:
+            line_h = 16.0
+            max_lines = int((panel_h - 52.0) // line_h)
+            lines = OverlayModel.get_map_metadata_lines(self.map_doc, self.tileset)
+            if len(lines) > max_lines:
+                lines = lines[: max_lines - 1] + ["..."]
+            self._metadata_texts = [
+                arcade.Text("MAP METADATA (F1 / H)", left + 16, top - 26, arcade.color.GOLD, 11, bold=True)
+            ]
+            y = top - 50.0
+            for line in lines:
+                if line:
+                    is_heading = line.isupper() or line.startswith(("MAP:", "TILESET DEFINITION:"))
+                    color = arcade.color.CYAN if is_heading else (220, 225, 230)
+                    self._metadata_texts.append(arcade.Text(line, left + 16, y, color, 9, bold=is_heading))
+                y -= line_h
+            self._last_metadata_key = key
+
+        for text_item in self._metadata_texts:
+            text_item.draw()
 
     def _draw_selection_box(self) -> None:
         """Renders highlighted selection diamond/square over the currently inspected cell."""
@@ -427,24 +441,9 @@ class ArcadeRenderer(IRenderer):
         arcade.draw_lrbt_rectangle_filled(0, win_w, 0, bar_h, (15, 18, 22, 230))
         arcade.draw_line(0, bar_h, win_w, bar_h, arcade.color.DARK_GRAY, 1)
 
-        info_parts: List[str] = []
-        if self.map_doc:
-            info_parts.append(f"Map: {self.map_doc.title} ({self.map_doc.width}x{self.map_doc.height})")
-            info_parts.append(f"View: {self.camera.perspective.value.upper()}")
-            info_parts.append(f"Layer: Z={self.camera.active_max_layer}/6")
-            info_parts.append(f"Zoom: {self.camera.zoom:.2f}x")
-
-            if self.hovered_cell:
-                hx, hy, hz = self.hovered_cell
-                cell = self.map_doc.get_cell(hx, hy, hz)
-                tile_info = ""
-                if cell:
-                    c_info = CellInspector.inspect_cell(cell, self.tileset)
-                    if c_info.primary_tile_name:
-                        tile_info = f" [{c_info.primary_tile_name}:{c_info.primary_tile_frame}]"
-                info_parts.append(f"Hover: ({hx}, {hy}, {hz}){tile_info}")
-
-        status_text = " | ".join(info_parts)
+        status_text = OverlayModel.get_status_bar_text(
+            self.map_doc, self.camera, self.hovered_cell, self.tileset
+        )
         if self._status_text_obj is None:
             self._status_text_obj = arcade.Text(status_text, 12, 7, arcade.color.WHITE, 12)
             self._last_status_text = status_text
@@ -656,6 +655,7 @@ class ArcadeRenderer(IRenderer):
     def render_frame(self, camera: Camera) -> None:
         """Forces single frame update (used in headless testing)."""
         self.camera = camera
+        self.input.camera = camera
         self.rebuild_sprites()
         if self.window:
             self.draw_viewport(self.window.width, self.window.height)

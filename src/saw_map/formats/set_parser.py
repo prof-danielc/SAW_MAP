@@ -47,12 +47,12 @@ class TilesetParser:
         Returns:
             TilesetDefinition populated with partitioned asset names.
         """
-        raw_lines = [line.strip() for line in content.splitlines()]
-
-        # Filter out empty lines and comment lines
+        # Filter out empty lines, comment lines, and trailing "# ..." comments
+        # (e.g. "13 11 11 28 # s l r c" in Messina.set)
         lines: List[str] = []
-        for line in raw_lines:
-            if not line or line.startswith("#") or line.startswith("//"):
+        for raw_line in content.splitlines():
+            line = raw_line.split("#", 1)[0].strip()
+            if not line or line.startswith("//"):
                 continue
             lines.append(line)
 

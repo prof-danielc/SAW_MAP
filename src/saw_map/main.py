@@ -191,7 +191,7 @@ def main(args: Optional[List[str]] = None) -> int:
             logger.warning(f"Failed to initialize Arcade backend ({exc}); falling back to Pygame")
             renderer = PygameRenderer()
 
-    title = f"Soldiers at War Map Visualizer - {map_doc.title}"
+    title = f"Soldiers at War Map Visualizer - {map_doc.name or map_doc.title}"
     try:
         renderer.initialize(1280, 720, title, maximized=parsed.maximize)
     except TypeError:

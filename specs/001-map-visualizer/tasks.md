@@ -30,8 +30,8 @@
 - [X] T011 [P] Implement unit tests for sprite archive RLE stream decoding and alpha mask creation in `tests/unit/test_rle_decoder.py`
 - [X] T012 [P] Implement companion `.set` definition parser (`TilesetParser`) partitioning into surfaces, left walls, right walls, and clutter in `src/saw_map/formats/set_parser.py`
 - [X] T013 [P] Implement unit tests for `.set` line count partitioning in `tests/unit/test_set_parser.py`
-- [X] T014 Implement gzip/raw container auto-detection and v20/v21 `AMB_MAP` stream parser (`MapReader`) in `src/saw_map/formats/map_reader.py`
-- [X] T015 [P] Implement unit tests for 16-bit cell component bitmask unpacking (`presence = word >> 15 & 1`, `group = word >> 7 & 0xFF`, `frame = word & 0x7F`) in `tests/unit/test_bitfield.py`
+- [X] T014 Implement gzip/raw container auto-detection and v19/v20/v21 `AMB_MAP` stream parser (`MapReader`, 193-byte header, centered playable window) in `src/saw_map/formats/map_reader.py`
+- [X] T015 [P] Implement unit tests for 16-bit cell component bitmask unpacking (`presence = word >> 15 & 1`, `frame = word >> 7 & 0xFF`, `group = word & 0x7F`) in `tests/unit/test_bitfield.py`
 - [X] T016 Implement recursive read-only file scanner and cataloger (`AssetInventory`) in `src/saw_map/assets/inventory.py`
 - [X] T017 [P] Implement central asset manager (`AssetLoader` implementing `IAssetLoader`) with RGBA texture caching in `src/saw_map/assets/loader.py`
 - [X] T018 Implement depth-sorting draw-order strategy (`DrawOrderStrategy`) sorting by `(layer_z, x + y, component_type, y)` in `src/saw_map/rendering/draw_order.py`
@@ -77,7 +77,7 @@
 ### Implementation for User Story 2
 
 - [X] T028 [US2] Implement Camera state manager with cursor-centered zoom and dragging in `src/saw_map/viewer/camera.py`
-- [X] T029 [US2] Implement keyboard and mouse event routing (Arrow keys, WASD, mouse drag, mouse wheel, reset `Home`/`R`) in `src/saw_map/viewer/input_handler.py`
+- [X] T029 [US2] Implement keyboard and mouse event routing (Arrow keys, WASD, mouse drag, cursor-centered mouse wheel zoom, reset `Home`/`R`) in `src/saw_map/viewer/input_handler.py`, used by both rendering backends
 - [X] T030 [US2] Implement 2D Top-Down orthogonal grid rendering mode alongside classic Isometric projection in `src/saw_map/rendering/arcade_backend.py`
 - [X] T031 [US2] Implement toggleable 2D top-down minimap corner overlay with active camera bounding rectangle in `src/saw_map/viewer/minimap.py`
 - [X] T032 [US2] Integrate perspective toggle (`Tab`/`T`) and minimap toggle (`M`) event handlers into `src/saw_map/viewer/input_handler.py`
