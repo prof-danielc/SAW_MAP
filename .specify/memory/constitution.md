@@ -1,13 +1,12 @@
 <!--
 Sync Impact Report:
-- Version Change: 1.1.0 -> 1.2.0
+- Version Change: 1.2.0 -> 1.3.0
 - Modified Principles:
-  - Harmonized "Principle: Version Control Discipline" into Core Principles as "### V. Version Control Discipline"
-  - Added explicit Rationale for Principle V (Version Control Discipline)
+  - Added Principle VI: Reverse-Engineering Knowledge Tracking (mandating REVERSE_ENGINEERING_INFO.md maintenance)
 - Added Sections:
-  - None
+  - Added "Reverse-Engineering Documentation Gate" under Quality Gates & Performance Benchmarks
 - Removed Sections:
-  - Removed misplaced standalone trailing section "## Principle: Version Control Discipline"
+  - None
 - Follow-up TODOs:
   - None (all placeholders resolved)
 -->
@@ -57,11 +56,18 @@ Sync Impact Report:
 - **Transparent Reporting**: At the end of each implementation task or milestone, report all commits created, tests performed, and remaining uncommitted changes.
 - **Rationale**: Strict source control discipline protects code integrity, maintains clean audit trails, prevents accidental leakage of copyrighted binaries, and facilitates collaborative review and rollback.
 
+### VI. Reverse-Engineering Knowledge Tracking
+- **Canonical Knowledge Base**: All empirical discoveries, structural observations, hypotheses, confirmed binary structures, bitmask definitions, compression streams, and geometry layouts MUST be documented and tracked in a dedicated file named `REVERSE_ENGINEERING_INFO.md` at the project repository root.
+- **Continuous Synchronization**: Whenever new format knowledge, opcode behavior, header fields, or coordinate systems are discovered or revised during research or implementation, `REVERSE_ENGINEERING_INFO.md` MUST be updated as part of that same unit of work.
+- **Hypothesis Discipline**: Unconfirmed theories or provisional guesses MUST be explicitly demarcated from confirmed empirical facts to prevent speculative decoding errors.
+- **Rationale**: Undocumented legacy binary formats require painstaking empirical reconstruction. Maintaining a centralized, constantly updated record prevents knowledge fragmentation, avoids redundant reverse-engineering, and ensures parser implementations remain fully explainable and verifiable.
+
 ## Quality Gates & Performance Benchmarks
 
 - **Automated CI Verification**: Every change MUST pass all unit and integration tests, code formatting checks, and static linter rules before merging.
 - **Performance Regression Checks**: Changes impacting hot paths (rendering loops, asset decoders, spatial queries) MUST be benchmarked against established baselines. Any regression exceeding 5% in execution time or memory consumption MUST be justified and approved.
 - **Documentation Parity Gate**: Any change introducing or altering public APIs, file format parsing rules, or user interface controls MUST update developer and user documentation as part of the same pull request.
+- **Reverse-Engineering Documentation Gate**: Any change that uncovers, alters, or refines knowledge of game asset formats, map layouts, headers, or decoding algorithms MUST synchronize `REVERSE_ENGINEERING_INFO.md` before the task is marked complete.
 
 ## Development Workflow & Review Process
 
@@ -83,4 +89,4 @@ Sync Impact Report:
     - **PATCH**: Non-semantic clarifications, wording improvements, and typo corrections.
 - **Compliance Reviews**: Periodic compliance reviews MUST be performed across the codebase during milestone reviews to ensure continuous alignment with constitutional requirements.
 
-**Version**: 1.2.0 | **Ratified**: 2026-10-11 | **Last Amended**: 2026-10-11
+**Version**: 1.3.0 | **Ratified**: 2026-10-11 | **Last Amended**: 2026-10-11

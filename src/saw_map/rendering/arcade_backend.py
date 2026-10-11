@@ -37,9 +37,15 @@ class ArcadeWindow(arcade.Window):
     ) -> None:
         super().__init__(width, height, title, resizable=True)
         self.renderer = renderer
-        arcade.set_background_color(arcade.color.CHARCOAL)
+        arcade.set_background_color((20, 24, 30))
         self.mouse_screen_x: float = 0.0
         self.mouse_screen_y: float = 0.0
+
+    def on_resize(self, width: int, height: int) -> None:
+        """Updates camera viewport when window is resized."""
+        super().on_resize(width, height)
+        if self.renderer.world_camera:
+            self.renderer.world_camera.match_window()
 
     def on_draw(self) -> None:
         """Renders viewport frame."""
@@ -114,6 +120,7 @@ class ArcadeWindow(arcade.Window):
                 cam.perspective = ViewPerspective.TOP_DOWN
             else:
                 cam.perspective = ViewPerspective.ISOMETRIC
+            self.renderer._update_map_center()
             self.renderer.rebuild_sprites()
 
         # Minimap (M)
@@ -152,6 +159,7 @@ class ArcadeRenderer(IRenderer):
 
     def __init__(self) -> None:
         self.window: Optional[ArcadeWindow] = None
+        self.world_camera: Optional[arcade.camera.Camera2D] = None
         self.camera = Camera()
         self.map_doc: Optional[MapDocument] = None
         self.asset_loader: Optional[IAssetLoader] = None
@@ -166,10 +174,34 @@ class ArcadeRenderer(IRenderer):
         self.sprite_list = arcade.SpriteList()
         self._texture_cache: Dict[Tuple[str, int, str], arcade.Texture] = {}
         self.hovered_cell: Optional[Tuple[int, int, int]] = None
+        self.map_center_x: float = 0.0
+        self.map_center_y: float = 0.0
+
+        # Cached Text object for status bar
+        self._status_text_obj: Optional[arcade.Text] = None
+        self._last_status_text: str = ""
 
     def initialize(self, width: int = 1280, height: int = 720, title: str = "SAW Map Visualizer") -> None:
-        """Initializes Arcade window."""
+        """Initializes Arcade window and Camera2D."""
         self.window = ArcadeWindow(width, height, title, self)
+        self.world_camera = arcade.camera.Camera2D(window=self.window)
+
+    def _update_map_center(self) -> None:
+        """Computes center of the active map in world coordinates."""
+        if not self.map_doc:
+            self.map_center_x = 0.0
+            self.map_center_y = 0.0
+            return
+        mid_x = self.map_doc.width / 2.0
+        mid_y = self.map_doc.height / 2.0
+        if self.camera.perspective == ViewPerspective.ISOMETRIC:
+            sx, sy = self.iso_transform.world_to_screen(mid_x, mid_y, 0)
+            self.map_center_x = sx
+            self.map_center_y = -sy
+        else:
+            sx, sy = self.top_transform.world_to_screen(mid_x, mid_y, 0)
+            self.map_center_x = sx
+            self.map_center_y = -sy
 
     def set_map(
         self,
@@ -183,6 +215,7 @@ class ArcadeRenderer(IRenderer):
         self.asset_loader = asset_loader
         self.tileset = tileset
         self.palette = palette
+        self._update_map_center()
         self.rebuild_sprites()
 
     def rebuild_sprites(self) -> None:
@@ -213,7 +246,6 @@ class ArcadeRenderer(IRenderer):
         is_iso = self.camera.perspective == ViewPerspective.ISOMETRIC
 
         for item in items:
-            # Resolve texture
             tex = self._get_texture(item, active_pal)
             if not tex:
                 continue
@@ -271,14 +303,12 @@ class ArcadeRenderer(IRenderer):
 
     def update_hover(self, mx: float, my: float, win_w: int, win_h: int) -> None:
         """Determines logical cell coordinates under cursor."""
-        if not self.map_doc:
+        if not self.map_doc or not self.world_camera:
             return
 
-        center_x = win_w / 2.0 + (self.camera.x * self.camera.zoom)
-        center_y = win_h / 2.0 + (self.camera.y * self.camera.zoom)
-
-        world_sx = (mx - center_x) / self.camera.zoom
-        world_sy = -(my - center_y) / self.camera.zoom
+        world_pt = self.world_camera.unproject((mx, my))
+        world_sx = world_pt.x
+        world_sy = -world_pt.y
 
         z_plane = float(
             self.camera.isolated_layer
@@ -298,17 +328,23 @@ class ArcadeRenderer(IRenderer):
 
     def draw_viewport(self, win_w: int, win_h: int) -> None:
         """Draws world sprites and diagnostic HUD overlays."""
-        center_x = win_w / 2.0 + (self.camera.x * self.camera.zoom)
-        center_y = win_h / 2.0 + (self.camera.y * self.camera.zoom)
+        if not self.world_camera:
+            return
 
-        # Draw world sprites using view transform
-        for sprite in self.sprite_list:
-            sprite.scale = self.camera.zoom
-            sprite.left = center_x + (sprite.center_x - sprite.width / 2.0) * self.camera.zoom
-            # arcade sprites use center coordinates
+        # 1. Activate world camera (GPU matrix transform)
+        cam_x = self.map_center_x - self.camera.x
+        cam_y = self.map_center_y - self.camera.y
+        self.world_camera.position = (cam_x, cam_y)
+        self.world_camera.zoom = self.camera.zoom
+        self.world_camera.use()
+
+        # 2. Draw world sprites hardware accelerated
         self.sprite_list.draw()
 
-        # Draw overlays
+        # 3. Activate default 1:1 camera for HUD & overlays
+        if self.window:
+            self.window.default_camera.use()
+
         self._draw_status_bar(win_w, win_h)
         if self.camera.show_minimap:
             self._draw_minimap(win_w, win_h)
@@ -342,7 +378,14 @@ class ArcadeRenderer(IRenderer):
                 info_parts.append(f"Hover: ({hx}, {hy}, {hz}) [{comp_info}]")
 
         status_text = " | ".join(info_parts)
-        arcade.draw_text(status_text, 12, 7, arcade.color.WHITE, 12)
+        if self._status_text_obj is None:
+            self._status_text_obj = arcade.Text(status_text, 12, 7, arcade.color.WHITE, 12)
+            self._last_status_text = status_text
+        elif self._last_status_text != status_text:
+            self._status_text_obj.text = status_text
+            self._last_status_text = status_text
+
+        self._status_text_obj.draw()
 
     def _draw_minimap(self, win_w: int, win_h: int) -> None:
         """Renders 2D top-down minimap overview in top-right corner."""
@@ -356,7 +399,6 @@ class ArcadeRenderer(IRenderer):
         # Background box
         arcade.draw_lrbt_rectangle_filled(left, left + mw, bottom, bottom + mh, (10, 12, 16, 220))
         arcade.draw_lrbt_rectangle_outline(left, left + mw, bottom, bottom + mh, arcade.color.GOLD, 1)
-        arcade.draw_text("MINIMAP (M)", left + 6, bottom + mh - 16, arcade.color.GOLD, 9)
 
         # Plot map boundary
         map_w = float(self.map_doc.width)
@@ -375,40 +417,6 @@ class ArcadeRenderer(IRenderer):
         left = win_w - side_w
         arcade.draw_lrbt_rectangle_filled(left, win_w, 28, win_h, (20, 24, 30, 245))
         arcade.draw_line(left, 28, left, win_h, arcade.color.GOLD, 1)
-
-        y = win_h - 24
-        arcade.draw_text("CELL INSPECTION (I)", left + 14, y, arcade.color.GOLD, 13, bold=True)
-        y -= 28
-
-        if self.hovered_cell and self.map_doc:
-            hx, hy, hz = self.hovered_cell
-            cell = self.map_doc.get_cell(hx, hy, hz)
-            arcade.draw_text(f"Coordinate: ({hx}, {hy}, {hz})", left + 14, y, arcade.color.WHITE, 11)
-            y -= 22
-            if cell:
-                arcade.draw_text(f"Elevation Byte: {cell.elevation_attr}", left + 14, y, arcade.color.LIGHT_GRAY, 11)
-                y -= 20
-                arcade.draw_text(f"Cell Flags: 0x{cell.flags:08X}", left + 14, y, arcade.color.LIGHT_GRAY, 11)
-                y -= 28
-
-                for label, comp in (
-                    ("Floor", cell.floor),
-                    ("Left Wall", cell.left_wall),
-                    ("Right Wall", cell.right_wall),
-                    ("Clutter", cell.clutter),
-                ):
-                    status = "PRESENT" if comp.is_present else "EMPTY"
-                    color = arcade.color.GREEN if comp.is_present else arcade.color.GRAY
-                    arcade.draw_text(f"• {label}: {status}", left + 14, y, color, 11, bold=True)
-                    y -= 18
-                    if comp.is_present:
-                        asset = self.tileset.resolve_asset(comp.component_type, comp.tileset_group_index) if self.tileset else None
-                        arcade.draw_text(f"   Asset: {asset or 'Unresolved'}", left + 14, y, arcade.color.WHITE, 10)
-                        y -= 16
-                        arcade.draw_text(f"   Group: {comp.tileset_group_index} | Frame: {comp.sprite_frame_index}", left + 14, y, arcade.color.LIGHT_GRAY, 10)
-                        y -= 20
-        else:
-            arcade.draw_text("Hover over a cell to inspect", left + 14, y, arcade.color.GRAY, 11)
 
     def render_frame(self, camera: Camera) -> None:
         """Forces single frame update (used in headless testing)."""
