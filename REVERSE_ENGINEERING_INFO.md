@@ -788,6 +788,93 @@ window obtained by centering the dimensions of the companion `.txt` file (§4).
 Which fields are absent is unknown; the older reader has not been transcribed. The visualizer
 reports its records as an unsupported layout and loads the tile grid normally.
 
+### 9.5 Mission Logic in the Game Executable — Confirmed from `SAW_Game_NOTES.c`
+
+`SAW_TD.exe` is the Scenario Builder and only stores the settings above. How they are used is
+in the game, `SAW_Game.exe` (decompilation `SAW_Game_NOTES.c`). Its map loader `sub_454FD3`
+(line 52734) reads the same stream into different globals: information tokens at
+`dword_5F8630` (28 bytes per token in memory), reinforcement tokens at `dword_5FCDE0`,
+reinforcement settings at `word_D072D0`, mission parameters at `word_D09BF0`, soldiers at
+`dword_CCB5E0` (1,760 bytes per soldier in memory).
+
+**Run-time fields of an information token** (not in the map file):
+
+| Global | Meaning |
+|---|---|
+| `word_5F8644` | "Triggered": a soldier of the player's side has stood within the token's radius (`sub_50FC9F`, line 122856). This is also when the token's popup text is shown, which confirms `radius`: the token covers the square of ± radius cells around it, on its own level |
+| `word_5F8646` | "Done": the target has been eliminated, or the character has been captured. A done token is not evaluated again |
+| `word_5F8648` | "Met this turn": the token's condition held at the last check; cleared after each reinforcement pass |
+
+**Objective check `sub_510617`** (line 123170), run from the main turn loop. It returns 1 for
+victory and −1 for defeat. It starts with "all goals met" and walks the 40 information tokens:
+
+| Assigned to | Condition | Met when |
+|---|---|---|
+| Character | Target Get | For an enemy character: its field `word_CCB710` is set (the same field excludes a soldier from presence tests; its exact meaning is not established). For any other character: a player soldier stands within the radius |
+| Character | Target Eliminate | The character's damage value (`word_CCB70A`) is 80 or more; done at 100 |
+| Any | Target Destination | A player soldier is within the radius of the target while no enemy soldier is |
+| Item | Target Get | The item's holder is a soldier of the player's nationality |
+| Cell | Target Eliminate | The clutter object (word 3) or the floor (word 0) of the token's cell has been destroyed (`sub_4509BA`: the object's damage state) |
+| Any | Trigger | The token has been triggered, or a player soldier stands within the radius |
+
+When a condition is met, `causes` decides: 1 returns victory at once, 2 returns defeat at once,
+3 counts as a goal. A token with causes 3 whose condition is not met clears "all goals met".
+Mission parameters (first block, `S-884750A`) add three more rules:
+
+| Field | Game global | Meaning | Airfield |
+|---|---|---|---|
+| 0 | `word_D09BF0[0]` | Unknown (default 1) | 6 |
+| 1 | `word_D09BF2` | Hour of the day; advances every second turn and wraps from 24 to 1 (line 82968) | 0 |
+| 2 | `word_D09BF8` | Turn limit: defeat when the turn counter `dword_D12348` reaches it; 0 = none | 0 |
+| 3 (u32) | `dword_D09BFC` | Exit required: with all goals met, victory comes only when every surviving soldier of the squad has left through a Mission Exit cell | 1 |
+| 4 (u32) | `dword_D09C00` | Eliminate all enemies: a goal that fails while any enemy soldier is alive and present | 0 |
+| 5 | `word_D09C04` | Player side index, converted to a nationality code by `sub_509FDC` | 0 |
+
+Over the 95 maps: 30 require the exit, 10 require eliminating all enemies, and 2 have a turn
+limit (12).
+
+**Reinforcement pass `sub_51294E`** (line 124078), run once per turn before the turn counter
+is incremented. A reinforcement token fires according to its entry condition:
+
+| Entry condition | Fires when |
+|---|---|
+| 0 Target Eliminate | The global event flag `word_D072C0` is set |
+| 1 Target Get | `word_D072C2` is set |
+| 2 Target Destination | `word_D072C4` is set |
+| 3 Sighted | `word_D072C6` is set (no code sets this flag) |
+| 4 Trigger | `word_D072C8` is set |
+| 5 Turn Limit | The turn counter has reached `turn_or_token` |
+| 6 Condition | Information token number `turn_or_token` was met this turn |
+
+The five event flags are **global, not per token**: the objective check sets the matching
+flag whenever *any* information token with that condition is met, and the pass clears all five
+when it finishes. "Target Eliminate" on a reinforcement token therefore means "an elimination
+objective of this mission has just been achieved", not a target of its own, and its Turn/Token
+value is ignored. A token also fires when the information token with the same slot number as
+the reinforcement slot is done (line 124097), which looks like an oversight.
+
+A fired token places one soldier per turn on its cell until `amount` is used up. The ninth
+word of the record (`word_D072E0`) is the run-time "fired" flag, which is why it is always 0
+in map files. The soldier's class is `64 + character_type` for American, `72 + character_type`
+for German, and `77 + character_type` for Neutral tokens, so the American list has 8 entries
+and the Neutral list 2. The token's percentage becomes the soldier's percentage, and the
+soldier's AI is set to Seeker (5) regardless of the stored value (`sub_50D507`, line 121601).
+
+**Airfield.** The map has no information token with Target Eliminate, so nothing in the map
+file checks the transport planes:
+- Victory needs information token 3 (the Map item held by a soldier of the squad) and, because
+  "exit required" is set, every surviving squad member on a Mission Exit cell. Destroying the
+  planes is stated in the briefing only.
+- The event flag `word_D072C0` is never set, so the 26 reinforcement tokens with entry
+  condition Target Eliminate never fire. Only the four Turn Limit tokens (turns 7 and 8) and
+  the two Condition tokens (information token 1, which does not exist in this map) remain, so
+  in practice four tokens bring in eight soldiers.
+- 14 maps have reinforcement tokens with entry condition 0 (141 tokens); 5 of them, including
+  both Airfield missions, contain no Target Eliminate information token. Entry condition 0 is
+  also the first entry of the list, so these tokens were probably left at an unset value.
+- Maps that do check destruction use Cell tokens with Target Eliminate: 50 in the 95 maps, 48
+  of them with One Goal Met, for example ten in Dresden and three each in Cassino and Normandy.
+
 ---
 
 ## 10. Scenario Builder Editor Discoveries (`Research/EditorScreenshots`)
@@ -926,11 +1013,11 @@ Scenario Builder, saving under a new name, and comparing the decompressed stream
 
 | Unknown | What is known | Status | Next step |
 |---|---|---|---|
-| Information token `radius` | 0 for token 3, as in its dialog; range 0–32 | Hypothesis | Controlled edit of the Token Radius |
+| Information token `radius` | Confirmed by the game code (§9.5): the token covers the square of ± radius cells on its own level | Resolved | — |
 | Information token word 3 | Always 0 | Unknown | Trace the dialog code |
-| Reinforcement word 8 | Always 0 | Unknown | Trace the dialog code |
-| Reinforcement character type lists | German list known (5 entries); American tokens use 0–7, Neutral tokens 0–1 | Partial | Read the two dropdown lists in the editor |
-| Entry conditions 2 and 3 (Target Destination, Sighted) | Never used in the shipped maps; assigned by list order | Hypothesis | Controlled edit |
+| Reinforcement word 8 | The run-time "fired" flag of the game (§9.5), always 0 in a map file | Resolved | — |
+| Reinforcement character type lists | German list known (5 entries). The game maps the value to soldier class 64 + n (American, 8 entries), 72 + n (German), 77 + n (Neutral, 2 entries) (§9.5) | Partial: the American and Neutral names are missing | Read the two dropdown lists in the editor |
+| Entry condition 3 (Sighted) | The game tests the flag `word_D072C6`, but no code sets it (§9.5) | Probably unimplemented | Search `SAW_Game.asm` for writes to `0xD072C6` |
 | Causes value 1 (Immediate Victory) | Never used in the shipped maps; assigned by list order | Hypothesis | Controlled edit |
 | Item `item_class` (1–5) and `item_kind` | No name table matched; the loader special-cases class 1 | Hypothesis | Match against the game's item tables; controlled edit of a canister's contents |
 | Item record last field (`u32`) | Not a position | Unknown | Tabulate by class and kind; ammunition count is a candidate |
@@ -946,7 +1033,7 @@ Scenario Builder, saving under a new name, and comparing the decompressed stream
 | `T-550328` | 8 × 8 bytes | Unknown | Trace the readers of the global |
 | `T-8923C0` | 100 × 6 bytes (`3 × u16`) | Unknown | Trace the readers of the global |
 | `T-559530` | 8 × 32 bytes | Unknown | Trace the readers of the global |
-| Mission parameter blocks `S-884750A`–`E` | Five blocks of 16, 8 × 8, 16, 8 × 12, and 6 bytes | Unknown; victory conditions, weather, and start time are expected there | Controlled edit of the mission settings dialog |
+| Mission parameter blocks `S-884750A`–`E` | First block decoded from the game code (§9.5): hour, turn limit, exit required, eliminate all enemies, player side; its first word is unknown. The other four blocks (8 × 8, 16, 8 × 12, and 6 bytes) are unknown | Partial | Trace the readers of `word_D09BF0[12]` onwards; controlled edit of the mission settings dialog |
 | `S-884828` | `u16 x, u16 y, u16`; became the last clicked cell in both controlled edits | Hypothesis: editor selection | Third word still unknown |
 | Turret group state | A non-zero state hides the turret, and its cells do not carry flag bit 6 (§3.7), so the turret is absent rather than destroyed. 141 of the 201 groups in the 95 maps are in that state, including Airfield's only group | Why absent groups stay in the table is unknown (deleted in the editor, or enabled by a script) | Controlled edit: place and delete a turret |
 | Turret group parts 10–20 | 9 of 20 part slots are used | Unknown | None needed unless a larger turret exists |
@@ -964,6 +1051,9 @@ Scenario Builder, saving under a new name, and comparing the decompressed stream
 | `Cgendam.obj` placement | Appended to the flat registry; no map references it | Presumed run-time damage overlays | Trace the damage code |
 | Sound and ambience triggers | Not examined | Unknown | — |
 | `minimap.col` / `Data/minimap.col` | Not examined | Unknown | — |
+
+| Airfield reinforcements | 26 tokens use entry condition Target Eliminate although the map has no elimination objective, and two refer to information token 1, which does not exist (§9.5) | Looks like unfinished mission scripting | Play the mission and count the reinforcements |
+| "Target Get" for a character | The game tests two soldier fields (`word_CCB6F8`, `word_CCB710`) whose meaning (changed sides, surrendered, captured) is not established | Hypothesis | Trace the writers of the two fields |
 
 ### 11.7 Suggested Order of Work
 
