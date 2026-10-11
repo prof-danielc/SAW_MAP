@@ -31,6 +31,11 @@ ARCHIVE_PEOPLE = "People"
 ARCHIVE_TOKEN = "Token"
 ARCHIVE_CAN = "Can"
 ARCHIVE_TURRET = "Turret"
+ARCHIVE_PORTRAIT = "Portrait"
+
+# Portrait.obj stores three frames per portrait number (normal, highlighted, darkened)
+PORTRAIT_FRAMES_PER_ID = 3
+NO_PORTRAIT = 0xFFFF
 
 # Cell flag bits evaluated by sub_43505D / sub_4508F9 / sub_434FB0
 FLAG_MISSION_EXIT = 1 << 0
@@ -106,6 +111,11 @@ _SINGLE_BIT_MARKERS: Tuple[Tuple[int, int, str], ...] = (
 def nationality_label(code: int) -> str:
     """Readable name of a nationality code."""
     return NATIONALITY_LABELS.get(code, f"nationality {code}")
+
+
+def portrait_frame(portrait: int) -> int:
+    """Portrait.obj frame of the normal picture of a portrait number."""
+    return PORTRAIT_FRAMES_PER_ID * portrait
 
 
 def list_name(names: Tuple[str, ...], index: int) -> str:
@@ -267,6 +277,8 @@ def _soldiers(post_tile: PostTileData, map_doc: MapDocument) -> List[PlacedEntit
             attributes["encumbrance"] = data["encumbrance"]
             attributes["field_medic"] = bool(data["field_medic"])
             attributes["facing"] = list_name(FACING_NAMES, data["facing"])
+            if data["portrait"] != NO_PORTRAIT:
+                attributes["portrait"] = f"{ARCHIVE_PORTRAIT}.obj:{portrait_frame(data['portrait'])}"
             appearance = data["appearance"]
             attributes["appearance"] = (
                 f"{appearance} ({APPEARANCE_NAMES[appearance]})" if appearance in APPEARANCE_NAMES else appearance

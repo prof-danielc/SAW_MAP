@@ -126,7 +126,7 @@ def test_soldier_token_info_extraction():
     assert soldier.attributes == {
         "hidden": False, "nationality": 2, "controller": "Computer", "rank": "Senior Sgt", "ai": "Guard",
         "primary": "Bolt Action", "secondary": "Submachinegun", "encumbrance": 30, "field_medic": False,
-        "facing": "SW", "appearance": 11, "percentage": 50,
+        "facing": "SW", "portrait": "Portrait.obj:240", "appearance": 11, "percentage": 50,
     }
     assert soldier.slot_index == 17 and soldier.source == TABLE_SOLDIER_POSITIONS
     assert soldier.anomalies == []

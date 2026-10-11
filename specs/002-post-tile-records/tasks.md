@@ -136,6 +136,7 @@
 - [X] T039 [US3] Show entity attributes in the sidebar, update the metadata summary, and label the cell byte as black-out mask in `src/saw_map/viewer/overlays.py` and both backends
 - [X] T040 [P] [US2] Tests for relocation entities, reinforcement attributes, loadout references, and the screenshot cells in `tests/unit/test_entities.py` and `tests/integration/test_post_tile_records.py`
 - [X] T041 [US4] Record the findings and the open folder discrepancy in `REVERSE_ENGINEERING_INFO.md`, `docs/formats.md`, `README.md`, and this feature's documents
+- [X] T047 [US2] Decode the soldier portrait number (`Portrait.obj` frame = 3 × portrait), verify it against the outfitting screenshot and all maps, and expose it on soldier entities
 - [X] T046 [US2] Decode information token target type, condition, and causes and the reinforcement character type, controller, AI, entry condition, and turn/token from the editor's dropdown lists; correct the information token field order; expose all values by name; add cross-map validation tests
 - [X] T045 [US2] Decode the item holder fields, canister contents, loadout grid, and civilian appearances from the controlled edit `Airfield_CIVILIANS.MAP`; place canister items as `ITEM` entities and report item counts on canisters; retract the item 'cell' field
 - [X] T044 [US2] Decode the Field Medic flag from a controlled map edit, name the facing values from the user's observations, expose both on soldier entities, and document the diff of `Airfield_MEDIC.MAP`

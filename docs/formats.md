@@ -94,6 +94,8 @@ Soldier fields store the index into the Scenario Builder's dropdown lists:
 - **Training** (0–6): None, Pistol, Submachinegun, Bolt Action, Semi/Automatic, Machinegun,
   Explosive.
 - **Field Medic**: 0 or 1.
+- **Portrait**: portrait number $p$, drawn from `Portrait.obj` frame $3p$ (frames $3p + 1$ and
+  $3p + 2$ are a highlighted and a darkened variant); `0xFFFF` = none.
 - **Appearance** (0–20): 0–7 American, 8–12 German, 13 Italian, 14 French, 15 male civilian,
   16 female civilian.
 - **Loadout**: 8 inventory areas × 4 rows × 6 columns of item slot indices; a large item

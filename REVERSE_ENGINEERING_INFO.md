@@ -619,7 +619,7 @@ decompilation and then checked against all 95 version 21 maps.
   | `+796` facing | 4 / 3 / 5 / 5 | Screen direction, clockwise from north: 0 N, 1 NE, 2 E, 3 SE, 4 S, 5 SW, 6 W, 7 NW (north = up, south = bottom of the screen) | Confirmed: IDs 9, 10, 39 face S, SE, SW in the editor |
   | `+12` appearance | 12 / 11 / 11 / 11 | Body type 0–20. Usage in the 95 maps: 0–7 American, 8–12 German, 13 Italian (all 102 soldiers of nationality 16), 14 French, 15 male civilian, 16 female civilian (Neutral and French), 17–20 rare | Confirmed by the frame formula below; 15 and 16 confirmed by the civilians edit |
   | `+306` | — | `0xFFFF` in 1,822 of 1,853 soldiers, 0 otherwise | Unknown |
-  | `+308` | 82 / 72 / 73 / 80 | 0–89 in original soldiers; `0xFFFF` in characters newly created with the editor. Possibly the index of a predefined character (name, portrait) | Hypothesis |
+  | `+308` portrait | 82 / 72 / 73 / 80 | Portrait number; the picture is `Portrait.obj` frame $3 \times \text{portrait}$. `0xFFFF` = none (characters newly created with the editor) | Confirmed (see below) |
   | `+326` (192 words) | — | Loadout: indices into the item table | Confirmed (all 27,813 non-empty words in 95 maps reference an in-use item slot) |
 
 > [!NOTE]
@@ -629,6 +629,18 @@ decompilation and then checked against all 95 version 21 maps.
 > for **1,831 of 1,852 soldiers** in the 95 version 21 maps. Within a body type the frames
 > therefore run S, SW, W, NW, N, NE, E, SE. The frame stored in the position table is redundant
 > with the two soldier fields; the 21 exceptions are presumably records edited inconsistently.
+
+- **Portrait (confirmed)**: `Obj/portrait.obj` has 287 frames, three per portrait number $p$:
+  frame $3p$ is the normal picture, $3p + 1$ the same face on red stripes, and $3p + 2$ a
+  darkened version. Portraits 0–67 have all three; from 68 on the second and third frames are
+  2 × 2 pixel placeholders, so the stride of three still holds. Frames 285 and 286 (portrait
+  95) are the "KIA" and "DISCHARGED" pictures.
+  - Screenshot check: Character ID 23 stores 80, and the face on its outfitting screen
+    (`airfield_dices_3_character_outfitting.png`) is frame 240.
+  - Data check: all 1,785 stored values in the 95 maps select a full-size frame at $3p$; the
+    other 68 soldiers hold `0xFFFF`.
+  - Usage by nationality: American soldiers use portraits 0–67 (402 of 404 with a portrait);
+    German and Italian soldiers 68–83 and 87–88; Neutral and French characters mostly 84–86.
 
 - **Controlled edit (`Airfield_MEDIC.MAP`)**: the user ticked "Field Medic" for Character ID 9
   in the Scenario Builder and saved the map under a new name. Compared with `Airfield.map`, the
@@ -653,8 +665,8 @@ decompilation and then checked against all 95 version 21 maps.
   - Civilian records: nationality 4 (Neutral), controller Computer, AI 2 (Hider), no training,
     rank Private / 1st Private, encumbrance 30, facing 5 (SW), appearance 15 (male) and 16
     (female). Their frames, 121 and 129, satisfy the frame formula.
-  - Offset `+308` changed from 39 and 65 to `0xFFFF`, and the second soldier array changed
-    from 1 to 0 for both slots.
+  - The portrait (`+308`) changed from 39 and 65 to `0xFFFF` (none), and the second soldier
+    array changed from 1 to 0 for both slots.
   - All 16 items held by the removed soldiers (holder 6 or 7) were freed to `0xFF`, and the
     loadout grids of both slots were emptied. This is what identified the item holder fields.
   - `S-884828` became `93, 67`, the last cell clicked, as in the first edit.
@@ -871,7 +883,8 @@ clicking an existing object in it opens that object's dialog.
 2. **Black-Out Mask (`byte4`)**:
    What the eight bits of the mask stand for, and how the game reveals blacked-out cells.
 3. **Soldier Records (`T-847E50`)**:
-   The two remaining scalars (`+306`, `+308`); how the game picks between a soldier's position
+   The remaining scalar `+306`; when the highlighted and darkened portrait frames are used; how
+   the game picks between a soldier's position
    and its alternate cell, and the role of the appearance percentage. Further controlled edits
    in the Scenario Builder (change one value, save under a new name, diff) are the quickest way
    to settle these.

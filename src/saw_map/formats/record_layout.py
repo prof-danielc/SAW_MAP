@@ -312,10 +312,11 @@ def _build_v21_layout() -> Tuple[TableLayout, ...]:
                     "15 and 16 are the male and female civilians added in a controlled edit",
                 ),
                 _u16(
-                    "field_m308",
-                    _HYPOTHESIS,
-                    "0..89 in original soldiers, 0xFFFF in characters newly created with the editor; possibly the "
-                    "index of a predefined character (name / portrait)",
+                    "portrait",
+                    _CONFIRMED,
+                    "portrait number; the picture is Portrait.obj frame 3 * portrait (80 for Character ID 23, whose "
+                    "outfitting screenshot shows frame 240). All 1,785 values in 95 maps select a full-size frame; "
+                    "0xFFFF means none (characters newly created with the editor)",
                 ),
                 _u16_array(
                     "loadout",

@@ -393,3 +393,20 @@ Corrected field order of the information token record: `target, target_type, rad
 condition, causes, cell`. The earlier assignment (condition at word 2 with value 9, causes at
 word 5 with value 1) was a misreading based on one dialog and is superseded.
 
+---
+
+## 16. Soldier Portrait
+
+The user described the layout of `Portrait.obj` (sets of three sprites per character up to
+sprite 203, single portraits after that) and proposed that soldier offset `+308` selects the
+portrait.
+
+| Finding | Status |
+|---|---|
+| Offset `+308` is the **portrait number** $p$; the picture is `Portrait.obj` frame $3p$. Character ID 23 holds 80 and its outfitting screenshot shows frame 240. | Confirmed |
+| All 1,785 stored values in the 95 maps select a full-size frame at $3p$; `0xFFFF` (68 soldiers, and every character newly created with the editor) means no portrait. | Confirmed |
+| The archive keeps a stride of three throughout: from portrait 68 on, the second and third frames exist as 2 × 2 pixel placeholders, which is why the later portraits look like single sprites in a viewer. | Confirmed |
+| American soldiers use portraits 0–67, German and Italian 68–83 and 87–88, civilians mostly 84–86. | Observation over all maps |
+
+The soldier entity now carries `portrait=Portrait.obj:<frame>`.
+

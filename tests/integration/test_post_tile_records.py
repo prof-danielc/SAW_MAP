@@ -187,6 +187,8 @@ def test_soldier_field_ranges_and_frame_formula(all_maps):
             assert data["primary_training"] <= 6 and data["secondary_training"] <= 6, path.name
             assert data["facing"] <= 7 and data["appearance"] <= 20, path.name
             assert data["field_medic"] in (0, 1), path.name
+            # Portrait numbers stay inside Portrait.obj (287 frames, three per portrait)
+            assert data["portrait"] == 0xFFFF or 3 * data["portrait"] < 287, path.name
             total += 1
             matching += record.values["frame"] == 8 * data["appearance"] + (data["facing"] + 4) % 8
 
@@ -225,6 +227,8 @@ def test_airfield_reference_placements():
     assert (character.attributes["nationality"], character.attributes["controller"]) == (2, "Computer")
     assert (character.attributes["percentage"], character.attributes["encumbrance"]) == (100, 30)
     assert character.attributes["ai"] == "Guard" and character.attributes["field_medic"] is False
+    # Portrait 80: the face shown in airfield_dices_3_character_outfitting.png is Portrait.obj frame 240
+    assert character.attributes["portrait"] == "Portrait.obj:240"
 
     # Rank and training of four characters as shown by the editor's Character Stats dialog
     # (rank, primary, secondary, AI or None, facing or None)
