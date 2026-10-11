@@ -1,0 +1,1 @@
+python run_viewer.py "Research/SSI/Soldiers at War/Single_g/Airfield.map" --game-dir "Research/SSI/Soldiers at War"

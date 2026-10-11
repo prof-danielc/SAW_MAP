@@ -1,17 +1,13 @@
 <!--
 Sync Impact Report:
-- Version Change: 0.0.0 (Uninitialized template) -> 1.0.0
+- Version Change: 1.1.0 -> 1.2.0
 - Modified Principles:
-  - Initialized Principle I: Code Quality & Maintainability
-  - Initialized Principle II: Rigorous Testing Standards
-  - Initialized Principle III: User Experience Consistency
-  - Initialized Principle IV: Performance Requirements & Resource Efficiency
-  - Removed template placeholder Principle V (consolidated into 4 targeted core principles)
+  - Harmonized "Principle: Version Control Discipline" into Core Principles as "### V. Version Control Discipline"
+  - Added explicit Rationale for Principle V (Version Control Discipline)
 - Added Sections:
-  - Quality Gates & Performance Benchmarks (replacing SECTION_2)
-  - Development Workflow & Review Process (replacing SECTION_3)
-- Removed Sections:
   - None
+- Removed Sections:
+  - Removed misplaced standalone trailing section "## Principle: Version Control Discipline"
 - Follow-up TODOs:
   - None (all placeholders resolved)
 -->
@@ -52,6 +48,15 @@ Sync Impact Report:
 - **Algorithmic Efficiency**: Spatial queries, tile lookups, and collision checks MUST utilize efficient spatial partitioning or indexed lookups (O(1) or O(log N)). Hot path rendering and parsing loops MUST minimize unnecessary heap allocations and redundant data copies.
 - **Rationale**: Managing large map boards and complex sprite collections can easily exhaust memory or drop frames if unoptimized. Enforcing strict latency budgets and memory discipline ensures smooth, professional editor performance.
 
+### V. Version Control Discipline
+- **Branch & History Hygiene**: All implementation work MUST be tracked using Git. Before implementation, inspect the current branch, working tree, and recent commit history. Preserve unrelated user changes and never discard uncommitted work.
+- **Granular Commits**: Organize changes into small, coherent, independently reviewable commits adhering to Conventional Commits standards.
+- **Verification Gate**: Run relevant automated tests and review the staged diff before every commit.
+- **Asset & Secret Protection**: Never commit original copyrighted game assets, proprietary binaries, local data files, secrets, credentials, or generated files excluded by `.gitignore`.
+- **Non-Destructive Operations**: Never rewrite history, force-push, or execute destructive Git commands without explicit user authorization. Do not push to a remote repository unless explicitly requested.
+- **Transparent Reporting**: At the end of each implementation task or milestone, report all commits created, tests performed, and remaining uncommitted changes.
+- **Rationale**: Strict source control discipline protects code integrity, maintains clean audit trails, prevents accidental leakage of copyrighted binaries, and facilitates collaborative review and rollback.
+
 ## Quality Gates & Performance Benchmarks
 
 - **Automated CI Verification**: Every change MUST pass all unit and integration tests, code formatting checks, and static linter rules before merging.
@@ -78,4 +83,4 @@ Sync Impact Report:
     - **PATCH**: Non-semantic clarifications, wording improvements, and typo corrections.
 - **Compliance Reviews**: Periodic compliance reviews MUST be performed across the codebase during milestone reviews to ensure continuous alignment with constitutional requirements.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-11 | **Last Amended**: 2026-10-11
+**Version**: 1.2.0 | **Ratified**: 2026-10-11 | **Last Amended**: 2026-10-11
