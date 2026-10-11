@@ -45,15 +45,18 @@ POST-TILE DATA: Airfield (version 21)
 Status: DECODED | offset 1183193 | 31366 bytes | 19 tables | 0 bytes unassigned
 
 [T-554F60] soldier_positions (CONFIRMED) | offset 1184153 | 40 slots x 14 bytes | 40 in use
-  fields: cell:CELL_REF(CONFIRMED) field_01:U16(UNKNOWN) field_02:U16(UNKNOWN) target:CELL_REF(HYPOTHESIS) field_04:U16(UNKNOWN)
-  slot  0: cell=(87, 70, 0) field_01=0 field_02=65535 target=None field_04=3
-  slot  1: cell=(91, 69, 0) ...
+  Position and People.obj frame of each soldier; parallel to the soldiers table.
+  source: sub_445F25 lines 41856-41860 (dword_554F60)
+  fields: cell:CELL_REF(CONFIRMED) hidden:U16(CONFIRMED) field_12:U16(UNKNOWN) aux_cell:CELL_REF(HYPOTHESIS) frame:U16(CONFIRMED)
+  slot   0: cell=(87, 70, 0) hidden=0 field_12=65535 aux_cell=None frame=3
   ...
 
-PLACED ENTITIES: 43
-  SOLDIER   (44, 41, 0)  T-554F60[17]  side=2
-  ITEM      (35, 25, 0)  T-892AD0[0]
+PLACED ENTITIES: 113
+  INFO          (92, 67, 0)  Token.obj:5      T-554A80[0]    assigned=Cell target=(92, 67, 0) condition=None causes=None radius=15 message=You open up your notebook ...
+  SOLDIER       (44, 41, 0)  People.obj:88    T-554F60[17]   hidden=False nationality=2 controller=Computer rank=Sargeant ai=Guard primary=Submachinegun secondary=Semi/Automatic encumbrance=30 facing=4 appearance=11 percentage=100 alternate_cell=(51, 47, 0)
   ...
+EDITOR MARKERS (cell flags): 27
+  mission exit: 27 cells
 ANOMALIES: 0
 ```
 
@@ -63,6 +66,8 @@ ANOMALIES: 0
 - Unused slots are omitted unless `--dump-unused` is given; the header line always states how
   many slots are in use.
 - `BYTES` fields print as hexadecimal.
+- Word arrays print their first 12 values.
+- Editor markers are summarised as a count per kind, not listed per cell.
 - When the status is not `DECODED`, the report consists of the first two lines, with the status
   detail on the second.
 
@@ -73,6 +78,6 @@ ANOMALIES: 0
 When the viewer loads a map, one line reports the outcome:
 
 ```text
-[INFO] Post-tile records decoded: 19 tables, 43 placed entities (40 soldiers, 1 item, 2 containers)
+[INFO] Post-tile records decoded: 19 tables, 113 placed entities
 [WARNING] Post-tile records not decoded: unsupported record layout for version 19
 ```

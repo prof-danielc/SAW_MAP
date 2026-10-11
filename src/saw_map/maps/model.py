@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
 
+from saw_map.maps.records import PlacedEntity, PostTileData
+
 
 # AMB_MAP stream versions sharing the 193-byte header and 13-byte cell layout.
 # Version 19 (Menu/Demo.MAP) only differs in the records following the tile array.
@@ -16,11 +18,16 @@ SUPPORTED_MAP_VERSIONS: Tuple[str, ...] = ("19", "20", "21")
 
 
 class ComponentType(IntEnum):
-    """Component categories corresponding to word positions in a 13-byte map cell."""
+    """Drawable categories of a cell, in draw order.
+
+    Values 0..3 correspond to the word positions in a 13-byte map cell; ENTITY covers
+    objects placed by the post-tile records and cell flags (soldiers, tokens, ...).
+    """
     FLOOR = 0
     LEFT_WALL = 1
     RIGHT_WALL = 2
     CLUTTER = 3
+    ENTITY = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,8 +74,16 @@ class MapCell:
     left_wall: CellComponent
     right_wall: CellComponent
     clutter: CellComponent
+    # Byte at stream offset +8. The Scenario Builder's "Black Out" mode clears bits of it;
+    # only 0xFF (visible) and 0x00 (blacked out) occur in shipped maps. The attribute
+    # keeps its historical name.
     elevation_attr: int = 0
     flags: int = 0
+
+    @property
+    def is_blacked_out(self) -> bool:
+        """True if the cell's black-out mask is not fully set (hidden until revealed)."""
+        return self.elevation_attr != 0xFF
 
     @property
     def roof_cutoff_layer(self) -> int:
@@ -151,6 +166,11 @@ class MapDocument:
     The stream always stores a 130x100x7 grid; the playable area is a
     `width` x `height` window starting at (`origin_x`, `origin_y`). Cell
     coordinates are absolute grid indices, as shown by the Scenario Builder.
+
+    `post_tile` holds the record tables decoded after the tile array (None for
+    synthetic documents) and `entities` the objects they place on the map.
+    `token_messages` holds the popup text of each information token, indexed by
+    token id (the first 40 lines of the companion .txt file; empty when unset).
     """
     title: str
     version: str
@@ -163,6 +183,12 @@ class MapDocument:
     mission_text: str = ""
     origin_x: int = 0
     origin_y: int = 0
+    post_tile: Optional[PostTileData] = None
+    token_messages: List[str] = field(default_factory=list)
+    entities: List[PlacedEntity] = field(default_factory=list)
+    _entity_index: Optional[Dict[Tuple[int, int, int], List[PlacedEntity]]] = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         """Validates map constraints per specification."""
@@ -190,6 +216,20 @@ class MapDocument:
     def center(self) -> Tuple[float, float]:
         """Grid coordinates (x, y) of the middle of the playable window."""
         return (self.origin_x + self.width / 2.0, self.origin_y + self.height / 2.0)
+
+    def set_entities(self, entities: List[PlacedEntity]) -> None:
+        """Replaces the placed entities and invalidates the per-cell lookup index."""
+        self.entities = entities
+        self._entity_index = None
+
+    def entities_at(self, x: int, y: int, z: int) -> List[PlacedEntity]:
+        """Returns the placed entities standing on cell (x, y, z)."""
+        if self._entity_index is None:
+            index: Dict[Tuple[int, int, int], List[PlacedEntity]] = {}
+            for entity in self.entities:
+                index.setdefault((entity.x, entity.y, entity.z), []).append(entity)
+            self._entity_index = index
+        return self._entity_index.get((x, y, z), [])
 
     def get_cell(self, x: int, y: int, z: int) -> Optional[MapCell]:
         """Retrieves cell at coordinate (x, y, z), or None if unpopulated or out of bounds."""

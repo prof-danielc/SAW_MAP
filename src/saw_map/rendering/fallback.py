@@ -17,6 +17,7 @@ CATEGORY_COLORS = {
     ComponentType.LEFT_WALL: (30, 144, 255, 200),   # Dodger Blue
     ComponentType.RIGHT_WALL: (0, 206, 209, 200),   # Dark Turquoise
     ComponentType.CLUTTER: (255, 20, 147, 220),     # Deep Pink / Magenta
+    ComponentType.ENTITY: (255, 215, 0, 220),       # Gold
 }
 
 

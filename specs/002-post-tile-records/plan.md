@@ -112,8 +112,7 @@ src/saw_map/
 
 tests/
 ├── unit/
-│   ├── test_record_layout.py   # NEW
-│   ├── test_records_reader.py  # NEW
+│   ├── test_records_reader.py  # NEW (layout and reader)
 │   └── test_entities.py        # NEW
 ├── integration/
 │   └── test_post_tile_records.py   # NEW: all maps, Airfield reference placements

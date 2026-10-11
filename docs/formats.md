@@ -43,7 +43,7 @@ Each 13-byte cell consists of:
 - `uint16 word1`: Left wall component
 - `uint16 word2`: Right wall component
 - `uint16 word3`: Clutter / object component
-- `uint8  byte4`: Unknown attribute (`0xFF` or `0x00`)
+- `uint8  byte4`: Black-out mask (`0xFF` visible, `0x00` blacked out)
 - `uint32 dword5`: Flags; bits 18–20 hold the floor cover level
 
 For each 16-bit component word:
@@ -58,10 +58,85 @@ floor that covers the cell from above.
 
 ### 1.6 Playable Window
 The stream always holds the full $130 \times 100$ grid. The playable $W \times H$ area, with $W$
-and $H$ taken from the last lines of the companion `.txt` mission file, is centered:
+and $H$ taken from the last lines of the companion `.txt` mission file, is centered (the same
+window is also stored in the post-tile records, section 1.7):
 $$X_{min} = \lfloor (130 - W) / 2 \rfloor, \quad Y_{min} = \lfloor (100 - H) / 2 \rfloor$$
 Cell coordinates remain absolute grid indices (as displayed by the Scenario Builder). Cells
 outside the window hold default grass fill or stale leftovers and are not part of the map.
+
+### 1.7 Post-Tile Record Tables (Offset `1,183,193`)
+Version 21 streams continue with 19 fixed-size record tables totalling 31,366 bytes. The ones
+with a confirmed role:
+
+| Table | Slots × size | Content |
+|---|---|---|
+| Soldier positions | 40 × 14 | Cell index, hidden word, alternate cell index, `People.obj` frame |
+| Soldiers | 40 × 424 | Per-soldier data: nationality, rank, controller, AI, primary and secondary training, facing, appearance, loadout as item slot indices; same slot order as the positions |
+| Reinforcement tokens | 40 × 6 | Cell index, `Token.obj` frame (7 Allied, 8 German, 9 Neutral) |
+| Reinforcements | 40 × 18 | Settings per token: nationality, character type, percentage, controller, AI, turn/token, entry condition, amount |
+| Information tokens | 40 × 18 | Mission triggers and objectives: target, target type, radius, condition, causes, cell; slot = Token ID; drawn as a folder |
+| Turret groups | 10 × 180 | State word and up to 20 parts of (cell index, `Turret.obj` frame) |
+| Playable window | 1 × 18 | Max column, max row, min column, min row |
+| Items | 500 × 18 | Mission item pool: holder type (5 soldier, 0 canister), holder (soldier slot or canister cell index), item class and kind |
+
+Cell indices are $Z \times 13000 + Y \times 130 + X$; `0xFFFFFFFF` means none. The full layout
+with per-field evidence status is `src/saw_map/formats/record_layout.py`; `--dump-records`
+prints it for a map. Version 19 streams have a shorter, undecoded record block.
+
+Soldier fields store the index into the Scenario Builder's dropdown lists:
+- **Nationality** (bit codes): 1 American, 2 German, 4 Neutral, 8 French, 16 Italian.
+- **Controller**: 0 Computer, 1 Human.
+- **Rank** (0–18): Private, 1st Private, Lance Cpl, Sr Lance Cpl, Corporal, Sargeant, Senior Sgt,
+  Sgt Major, Staff Sgt, 2nd Lieutenant, Lieutenant, Captain, Major, Lt Colonel, Brigadier,
+  Maj General, Lt General, General, Col General.
+- **Artificial Intelligence** (0–7): Follower, Guard, Hider, Mach Gunner, Medic, Seeker,
+  Stationary, Wander.
+- **Training** (0–6): None, Pistol, Submachinegun, Bolt Action, Semi/Automatic, Machinegun,
+  Explosive.
+- **Field Medic**: 0 or 1.
+- **Portrait**: portrait number $p$, drawn from `Portrait.obj` frame $3p$ (frames $3p + 1$ and
+  $3p + 2$ are a highlighted and a darkened variant); `0xFFFF` = none.
+- **Appearance** (0–20): 0–7 American, 8–12 German, 13 Italian, 14 French, 15 male civilian,
+  16 female civilian.
+- **Loadout**: 8 inventory areas × 4 rows × 6 columns of item slot indices; a large item
+  repeats over the grid cells it covers.
+- **Facing** (0–7, screen directions, north = up): N, NE, E, SE, S, SW, W, NW.
+- **Sprite**: the soldier's `People.obj` frame equals
+  $8 \times \text{appearance} + (\text{facing} + 4) \bmod 8$ for 1,831 of 1,852 soldiers in the
+  shipped maps (21 body types × 8 directions; within a body type the frames run S, SW, W, NW,
+  N, NE, E, SE).
+
+Information token fields:
+- **Target type** ("Assign Token"): 0 Cell, 5 Character, 9 Item; the target is then the token's
+  cell index, a soldier slot, or an item slot.
+- **Condition** (0–4): None, Target Get, Target Eliminate, Target Destination, Trigger.
+- **Causes** (0–3): None, Immediate Victory, Immediate Defeat, One Goal Met.
+
+Reinforcement fields:
+- **Character type** (German tokens, 0–4): Infantry, Grenadier, Officer, SS Infantry, SS Officer.
+- **Artificial Intelligence**: index into the soldier list; only Seeker (5) and Wander (7) occur.
+- **Entry condition** (0–6): Target Eliminate, Target Get, Target Destination, Sighted, Trigger,
+  Turn Limit, Condition.
+- **Turn/Token**: turn number for Turn Limit, token id for Condition.
+
+The companion `.txt` mission file has 49 lines: lines 1–40 are the popup messages of
+information tokens 0–39, line 41 is the mission briefing, lines 43–46 the objective states, and
+lines 47–49 the playable width, height, and a number that changes on every save.
+
+### 1.8 Cell Flags Used for Placement
+| Bits of `dword5` | Meaning |
+|---|---|
+| 0 | Mission Exit cell |
+| 4, with 12–17 | Item / canister drawn from `Can.obj`, frame in bits 12–17 |
+| 5 | A soldier stands on the cell, or it is a soldier's alternate cell (dice) |
+| 7 | An information token is on the cell |
+| 9 | Land mine |
+| 10 | A reinforcement token is on the cell |
+| 23 | Lockable |
+| 24–26 | Multiplayer marker 1–4 |
+| 28–30 | Area effect marker (purpose unknown) |
+| 31 | Medical |
+| 18–20 | Floor cover level (section 1.5) |
 
 ---
 

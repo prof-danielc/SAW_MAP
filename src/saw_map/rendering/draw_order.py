@@ -1,7 +1,7 @@
 """Depth-sorting and draw-order calculation strategy for dimetric isometric rendering.
 
 Ensures strict back-to-front rendering by elevation layer, isometric grid distance (X + Y),
-sub-component priority (Floor -> Left Wall -> Right Wall -> Clutter), and row Y.
+sub-component priority (Floor -> Left Wall -> Right Wall -> Clutter -> Entity), and row Y.
 """
 
 from __future__ import annotations
@@ -10,19 +10,24 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from saw_map.maps.model import CellComponent, ComponentType, MapDocument, TilesetDefinition
+from saw_map.maps.records import EntityCategory, PlacedEntity
 
 
 @dataclass(slots=True)
 class RenderItem:
-    """An individual visual component scheduled for drawing."""
+    """An individual visual component or placed entity scheduled for drawing.
+
+    Exactly one of `component` (a cell word) and `entity` (a placed entity) is set.
+    """
     grid_x: int
     grid_y: int
     grid_z: int
     component_type: ComponentType
-    component: CellComponent
+    component: Optional[CellComponent]
     asset_name: Optional[str]
     sprite_frame_index: int
     sort_key: tuple[int, int, int, int]
+    entity: Optional[PlacedEntity] = None
 
 
 class DrawOrderStrategy:
@@ -44,6 +49,8 @@ class DrawOrderStrategy:
         show_left_walls: bool = True,
         show_right_walls: bool = True,
         show_clutter: bool = True,
+        show_entities: bool = True,
+        show_markers: bool = False,
     ) -> List[RenderItem]:
         """Collects, filters, and depth-sorts all visible components in the map document.
 
@@ -56,6 +63,8 @@ class DrawOrderStrategy:
             show_left_walls: Left wall visibility toggle.
             show_right_walls: Right wall visibility toggle.
             show_clutter: Objects and clutter visibility toggle.
+            show_entities: Placed entities (soldiers, tokens, info items, ...) visibility toggle.
+            show_markers: Editor markers derived from cell flags visibility toggle.
 
         Returns:
             Sorted list of RenderItem instances ready for drawing back-to-front.
@@ -108,6 +117,35 @@ class DrawOrderStrategy:
                         sort_key=cls.get_sort_key(z, x, y, comp.component_type),
                     )
                 )
+
+        # Placed entities are drawn after the clutter of their own cell. Soldiers the
+        # engine does not draw (hidden flag) stay listed in the inspector only.
+        for entity in map_doc.entities:
+            if entity.category == EntityCategory.MARKER:
+                if not show_markers:
+                    continue
+            elif not show_entities or entity.attributes.get("hidden"):
+                continue
+
+            if isolated_layer is not None:
+                if entity.z != isolated_layer:
+                    continue
+            elif entity.z > max_layer:
+                continue
+
+            items.append(
+                RenderItem(
+                    grid_x=entity.x,
+                    grid_y=entity.y,
+                    grid_z=entity.z,
+                    component_type=ComponentType.ENTITY,
+                    component=None,
+                    asset_name=entity.sprite_archive,
+                    sprite_frame_index=entity.sprite_frame or 0,
+                    sort_key=cls.get_sort_key(entity.z, entity.x, entity.y, ComponentType.ENTITY),
+                    entity=entity,
+                )
+            )
 
         # In-place sort by 4-tuple key
         items.sort(key=lambda item: item.sort_key)

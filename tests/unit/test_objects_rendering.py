@@ -155,7 +155,8 @@ def test_airfield_real_map_objects():
 
     doc = MapReader.parse_map(map_path)
     tileset = TilesetParser.parse_file(set_path)
-    items = DrawOrderStrategy.generate_render_list(doc, tileset, max_layer=6)
+    # Tile components only; placed entities are covered by test_post_tile_records.py
+    items = DrawOrderStrategy.generate_render_list(doc, tileset, max_layer=6, show_entities=False)
 
     # Check that planes, fences, and trees are present in the render list
     assets = {it.asset_name for it in items}

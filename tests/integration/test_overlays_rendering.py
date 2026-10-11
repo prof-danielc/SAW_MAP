@@ -42,6 +42,9 @@ def test_pygame_minimap_and_sidebar_rendering():
     # 3. Key presses route through the shared InputHandler; metadata dialog renders
     renderer._handle_keydown(pygame.K_F1)
     assert cam.show_metadata is True
+    renderer._handle_keydown(pygame.K_6)
+    assert cam.show_markers is True
+    renderer.hovered_cell = (44, 41, 0)  # cell holding a soldier
     renderer._handle_keydown(pygame.K_PAGEDOWN)
     assert cam.active_max_layer == 5
     renderer._handle_keydown(pygame.K_HOME)
@@ -80,6 +83,13 @@ def test_arcade_minimap_and_sidebar_rendering():
     # 3. Key presses route through the shared InputHandler; metadata dialog renders
     renderer.window.on_key_press(arcade.key.H, 0)
     assert cam.show_metadata is True
+    entity_sprites = len(renderer.sprite_list)
+    renderer.window.on_key_press(arcade.key.KEY_5, 0)
+    assert cam.show_entities is False
+    assert len(renderer.sprite_list) < entity_sprites
+    renderer.window.on_key_press(arcade.key.KEY_5, 0)
+    assert len(renderer.sprite_list) == entity_sprites
+    renderer.hovered_cell = (44, 41, 0)  # cell holding a soldier
     renderer.window.on_key_press(arcade.key.Q, 0)
     assert cam.active_max_layer == 5
     renderer.window.on_mouse_scroll(320, 240, 0, 1)

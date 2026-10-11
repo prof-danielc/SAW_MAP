@@ -53,15 +53,17 @@ turns into an exception or a non-zero exit code.
 ## 3. Entity Extraction (`saw_map.maps.entities`)
 
 ```python
-def extract_entities(post_tile: PostTileData, map_doc: MapDocument) -> List[PlacedEntity]:
-    """Builds placed entities from decoded tables, flagging anomalies."""
+def extract_entities(map_doc: MapDocument) -> List[PlacedEntity]:
+    """Builds placed entities from the map's decoded tables and cell flags, flagging anomalies."""
 ```
 
 **Guarantees**
 - Only records with `in_use == True` and a valid cell reference produce an entity.
-- An entity outside the playable window carries the anomaly `"outside playable window"`.
-- Returns an empty list when `post_tile.status` is not `DECODED`.
-- Deterministic order: by source table in stream order, then by slot index.
+- An entity outside the playable window carries the anomaly `"outside playable window"`; a table entity whose cell lacks the engine's cell flag carries `"cell flag not set"`.
+- Table entities are omitted when `map_doc.post_tile` is absent or not `DECODED`; cell-flag entities (canisters, editor markers) are always produced.
+- A soldier with an alternate cell also yields a `RELOCATION` entity on that cell, carrying the soldier's slot.
+- Entities the engine does not draw (hidden soldiers, turret groups with a non-zero state) carry the attribute `hidden = True`.
+- Deterministic order: table entities by source table in stream order then slot index, followed by cell-flag entities.
 
 ---
 
@@ -78,9 +80,10 @@ Output structure is specified in [cli-contract.md](cli-contract.md).
 
 ## 5. Rendering and Viewer Integration
 
-- `DrawOrderStrategy.generate_render_list(..., show_entities: bool = True)` appends one
-  `RenderItem` of type `ComponentType.ENTITY` per placed entity that passes the elevation
-  filter. Existing parameters and behaviour are unchanged when the map has no entities.
+- `DrawOrderStrategy.generate_render_list(..., show_entities: bool = True, show_markers: bool = False)`
+  appends one `RenderItem` of type `ComponentType.ENTITY` per placed entity that passes the
+  elevation filter; `MARKER` entities follow `show_markers`, all others `show_entities`, and
+  entities with `hidden = True` are never drawn. Existing parameters and behaviour are unchanged when the map has no entities.
 - Backends draw an `ENTITY` item with its sprite when `sprite_archive` is set, otherwise with
   the category marker from `saw_map.rendering.fallback`.
 - `CellInspector.inspect_cell(cell, tileset, entities=())` fills
@@ -94,6 +97,7 @@ Output structure is specified in [cli-contract.md](cli-contract.md).
 
 | Input Action | Primary Key | Function |
 |---|---|---|
-| **Toggle Entities** (`InputAction.TOGGLE_ENTITIES`) | `5` | Shows or hides placed soldiers, items, containers, and zones |
+| **Toggle Entities** (`InputAction.TOGGLE_ENTITIES`) | `5` | Shows or hides placed soldiers, alternate positions, reinforcement tokens, info items, canisters, turrets, and items |
+| **Toggle Editor Markers** (`InputAction.TOGGLE_MARKERS`) | `6` | Shows or hides the markers stored in cell flags (off by default) |
 
 All existing bindings of feature 001 are unchanged.

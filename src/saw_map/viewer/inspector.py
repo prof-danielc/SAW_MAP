@@ -7,10 +7,11 @@ camera pan offsets, zoom levels, and elevation planes.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from saw_map.geometry.transform import IsometricTransform, TopDownTransform
 from saw_map.maps.model import MapCell, MapDocument, TilesetDefinition
+from saw_map.maps.records import EntityCategory, PlacedEntity
 from saw_map.viewer.camera import Camera, ViewPerspective
 
 
@@ -40,6 +41,7 @@ class CellInspectionInfo:
     primary_tile_name: Optional[str] = None
     primary_tile_frame: Optional[int] = None
     primary_tile_label: str = "None"
+    entities: Tuple[PlacedEntity, ...] = ()
 
 
 class CellInspector:
@@ -80,10 +82,8 @@ class CellInspector:
             # Raycast from top-most visible layer down to layer 0
             for z in z_layers:
                 gx, gy = self.iso_transform.screen_to_world(world_sx, world_sy, float(z))
-                if map_doc.contains(gx, gy):
-                    cell = map_doc.get_cell(gx, gy, z)
-                    if cell and cell.has_visual_content():
-                        return (gx, gy, z)
+                if map_doc.contains(gx, gy) and self._is_pickable(map_doc, gx, gy, z):
+                    return (gx, gy, z)
 
             # Fallback to ground base layer (0) or lowest visible layer
             fallback_z = z_layers[-1] if z_layers else 0
@@ -96,12 +96,19 @@ class CellInspector:
             gx, gy = self.top_transform.screen_to_world(world_sx, world_sy, 0.0)
             if map_doc.contains(gx, gy):
                 for z in z_layers:
-                    cell = map_doc.get_cell(gx, gy, z)
-                    if cell and cell.has_visual_content():
+                    if self._is_pickable(map_doc, gx, gy, z):
                         return (gx, gy, z)
                 fallback_z = z_layers[-1] if z_layers else 0
                 return (gx, gy, fallback_z)
             return None
+
+    @staticmethod
+    def _is_pickable(map_doc: MapDocument, x: int, y: int, z: int) -> bool:
+        """True if cell (x, y, z) shows a tile component or holds a placed entity."""
+        cell = map_doc.get_cell(x, y, z)
+        if cell and cell.has_visual_content():
+            return True
+        return any(e.category != EntityCategory.MARKER for e in map_doc.entities_at(x, y, z))
 
     def pick_cell(
         self,
@@ -185,6 +192,7 @@ class CellInspector:
         cls,
         cell: MapCell,
         tileset: Optional[TilesetDefinition] = None,
+        entities: Sequence[PlacedEntity] = (),
     ) -> CellInspectionInfo:
         """Inspects and formats all 4 component words and attributes of a MapCell.
 
@@ -195,7 +203,8 @@ class CellInspector:
           - Slot 3 (Word 3, +6): Clutter / object
 
         The primary tile is the first present component in the order
-        floor, clutter, left wall, right wall.
+        floor, clutter, left wall, right wall. `entities` are the placed entities
+        standing on the cell (MapDocument.entities_at) and are passed through.
         """
         components: List[ComponentInspectionInfo] = []
         slot_components = (cell.floor, cell.left_wall, cell.right_wall, cell.clutter)
@@ -249,6 +258,7 @@ class CellInspector:
             primary_tile_name=primary_tile_name,
             primary_tile_frame=primary_tile_frame,
             primary_tile_label=primary_tile_label,
+            entities=tuple(entities),
         )
 
     @staticmethod
