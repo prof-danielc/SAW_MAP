@@ -74,55 +74,151 @@ class DrawOrderStrategy:
             if isolated_layer is not None:
                 if z != isolated_layer:
                     continue
+                cutoff_limit = isolated_layer
             else:
                 if z > max_layer:
                     continue
+                cutoff_limit = max_layer
 
             if cell.is_empty():
                 continue
 
-            for declared_type, comp in (
-                (ComponentType.FLOOR, cell.floor),
-                (ComponentType.LEFT_WALL, cell.left_wall),
-                (ComponentType.RIGHT_WALL, cell.right_wall),
-                (ComponentType.CLUTTER, cell.clutter),
-            ):
-                if not comp.is_present:
-                    continue
+            # 1. Roof / Ceiling geometry from cell.floor (Word 0)
+            # In the Soldiers at War engine (sub_4508F9 / sub_43948B), Word 0 is rendered ONLY if
+            # ((cell.flags >> 18) & 7) > cutoff_limit, and not storing a clutter object frame.
+            # When tileset is None (synthetic unit tests), render if present.
+            if cell.floor.is_present and not cell.has_clutter_object:
+                if tileset is None or cell.roof_cutoff_layer > cutoff_limit:
+                    if cell.floor.sprite_frame_index < 200:
+                        eff_type = (
+                            tileset.get_component_type_for_group(cell.floor.tileset_group_index)
+                            if tileset
+                            else ComponentType.FLOOR
+                        )
+                        if type_visibility[eff_type]:
+                            asset_name = (
+                                tileset.resolve_asset(eff_type, cell.floor.tileset_group_index)
+                                if tileset
+                                else None
+                            )
+                            if asset_name is not None or tileset is None:
+                                sort_key = cls.get_sort_key(z, x, y, eff_type)
+                                items.append(
+                                    RenderItem(
+                                        grid_x=x,
+                                        grid_y=y,
+                                        grid_z=z,
+                                        component_type=eff_type,
+                                        component=cell.floor,
+                                        asset_name=asset_name,
+                                        sprite_frame_index=cell.floor.sprite_frame_index,
+                                        sort_key=sort_key,
+                                    )
+                                )
 
-                # Filter out boundary / roof mask frames (>= 200)
-                if comp.sprite_frame_index >= 200:
-                    continue
-
-                # Determine effective component type based on tileset registry if available
-                effective_type = (
-                    tileset.get_component_type_for_group(comp.tileset_group_index)
-                    if tileset
-                    else declared_type
-                )
-
-                if not type_visibility[effective_type]:
-                    continue
-
-                asset_name: Optional[str] = None
-                if tileset:
-                    asset_name = tileset.resolve_asset(effective_type, comp.tileset_group_index)
-                    if asset_name is None:
-                        continue
-
-                sort_key = cls.get_sort_key(z, x, y, effective_type)
-                items.append(
-                    RenderItem(
-                        grid_x=x,
-                        grid_y=y,
-                        grid_z=z,
-                        component_type=effective_type,
-                        component=comp,
-                        asset_name=asset_name,
-                        sprite_frame_index=comp.sprite_frame_index,
-                        sort_key=sort_key,
+            # 2. Structural Left Wall (Word 1)
+            if cell.left_wall.is_present:
+                eff_type = ComponentType.LEFT_WALL
+                if type_visibility[eff_type]:
+                    eff_frame = (
+                        0 if cell.left_wall.sprite_frame_index >= 200 else cell.left_wall.sprite_frame_index
                     )
+                    asset_name = (
+                        tileset.resolve_asset(eff_type, cell.left_wall.tileset_group_index)
+                        if tileset
+                        else None
+                    )
+                    if asset_name is not None or tileset is None:
+                        sort_key = cls.get_sort_key(z, x, y, eff_type)
+                        items.append(
+                            RenderItem(
+                                grid_x=x,
+                                grid_y=y,
+                                grid_z=z,
+                                component_type=eff_type,
+                                component=cell.left_wall,
+                                asset_name=asset_name,
+                                sprite_frame_index=eff_frame,
+                                sort_key=sort_key,
+                            )
+                        )
+
+            # 3. Structural Right Wall (Word 2)
+            if cell.right_wall.is_present:
+                eff_type = ComponentType.RIGHT_WALL
+                if type_visibility[eff_type]:
+                    eff_frame = (
+                        0 if cell.right_wall.sprite_frame_index >= 200 else cell.right_wall.sprite_frame_index
+                    )
+                    asset_name = (
+                        tileset.resolve_asset(eff_type, cell.right_wall.tileset_group_index)
+                        if tileset
+                        else None
+                    )
+                    if asset_name is not None or tileset is None:
+                        sort_key = cls.get_sort_key(z, x, y, eff_type)
+                        items.append(
+                            RenderItem(
+                                grid_x=x,
+                                grid_y=y,
+                                grid_z=z,
+                                component_type=eff_type,
+                                component=cell.right_wall,
+                                asset_name=asset_name,
+                                sprite_frame_index=eff_frame,
+                                sort_key=sort_key,
+                            )
+                        )
+
+            # 4. Ground Surface / Procedural Surface / Clutter (Word 3)
+            # In Soldiers at War maps, Word 3 encodes ground surface tiles (e.g. ssnow1, sdirt,
+            # sstone1) as well as elevated floors/platforms.
+            if cell.clutter.is_present and cell.clutter.sprite_frame_index < 200:
+                eff_type = (
+                    tileset.get_component_type_for_group(cell.clutter.tileset_group_index)
+                    if tileset
+                    else ComponentType.CLUTTER
                 )
+                if type_visibility[eff_type]:
+                    asset_name = (
+                        tileset.resolve_asset(eff_type, cell.clutter.tileset_group_index)
+                        if tileset
+                        else None
+                    )
+                    if asset_name is not None or tileset is None:
+                        sort_key = cls.get_sort_key(z, x, y, eff_type)
+                        items.append(
+                            RenderItem(
+                                grid_x=x,
+                                grid_y=y,
+                                grid_z=z,
+                                component_type=eff_type,
+                                component=cell.clutter,
+                                asset_name=asset_name,
+                                sprite_frame_index=cell.clutter.sprite_frame_index,
+                                sort_key=sort_key,
+                            )
+                        )
+
+            # 5. Clutter object from flags (planes, trees, vehicles, guns, warehouses, crates)
+            if cell.has_clutter_object and type_visibility[ComponentType.CLUTTER]:
+                clutter_group = cell.clutter_object_group
+                clutter_frame = cell.clutter_object_frame
+                clutter_asset = tileset.resolve_flat_asset(clutter_group) if tileset else None
+                if clutter_asset or not tileset:
+                    sort_key = cls.get_sort_key(z, x, y, ComponentType.CLUTTER)
+                    items.append(
+                        RenderItem(
+                            grid_x=x,
+                            grid_y=y,
+                            grid_z=z,
+                            component_type=ComponentType.CLUTTER,
+                            component=cell.clutter,
+                            asset_name=clutter_asset,
+                            sprite_frame_index=clutter_frame,
+                            sort_key=sort_key,
+                        )
+                    )
 
         # In-place sort by 4-tuple key
         items.sort(key=lambda item: item.sort_key)

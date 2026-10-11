@@ -341,19 +341,30 @@ class CellInspector:
             primary_tile_name = asset3 if asset3.lower().endswith(".obj") else f"{asset3}.obj"
             primary_tile_frame = comp3.sprite_frame_index
             primary_tile_label = f"{primary_tile_name} (Frame {primary_tile_frame})"
+        # Check clutter object in flags (planes, trees, vehicles, etc.)
+        elif cell.has_clutter_object and tileset:
+            clutter_asset = tileset.resolve_flat_asset(cell.clutter_object_group)
+            if clutter_asset:
+                primary_tile_name = clutter_asset if clutter_asset.lower().endswith(".obj") else f"{clutter_asset}.obj"
+                primary_tile_frame = cell.clutter_object_frame
+                primary_tile_label = f"{primary_tile_name} (Frame {primary_tile_frame})"
         # Check roof tile (Slot 0)
         elif comp0.is_present and comp0.sprite_frame_index < 200 and asset0:
             primary_tile_name = asset0 if asset0.lower().endswith(".obj") else f"{asset0}.obj"
             primary_tile_frame = comp0.sprite_frame_index
             primary_tile_label = f"{primary_tile_name} (Frame {primary_tile_frame})"
-        # Check walls (Slot 1, then Slot 2)
-        elif comp1.is_present and comp1.sprite_frame_index < 200 and asset1:
+        # Check walls (Slot 1, then Slot 2, then Slot 0 if wall)
+        elif comp1.is_present and (comp1.sprite_frame_index < 200 or 13 <= comp1.tileset_group_index <= 36) and asset1:
             primary_tile_name = asset1 if asset1.lower().endswith(".obj") else f"{asset1}.obj"
-            primary_tile_frame = comp1.sprite_frame_index
+            primary_tile_frame = 0 if comp1.sprite_frame_index >= 200 else comp1.sprite_frame_index
             primary_tile_label = f"{primary_tile_name} (Frame {primary_tile_frame})"
-        elif comp2.is_present and comp2.sprite_frame_index < 200 and asset2:
+        elif comp2.is_present and (comp2.sprite_frame_index < 200 or 13 <= comp2.tileset_group_index <= 36) and asset2:
             primary_tile_name = asset2 if asset2.lower().endswith(".obj") else f"{asset2}.obj"
-            primary_tile_frame = comp2.sprite_frame_index
+            primary_tile_frame = 0 if comp2.sprite_frame_index >= 200 else comp2.sprite_frame_index
+            primary_tile_label = f"{primary_tile_name} (Frame {primary_tile_frame})"
+        elif comp0.is_present and 13 <= comp0.tileset_group_index <= 36 and asset0:
+            primary_tile_name = asset0 if asset0.lower().endswith(".obj") else f"{asset0}.obj"
+            primary_tile_frame = 0 if comp0.sprite_frame_index >= 200 else comp0.sprite_frame_index
             primary_tile_label = f"{primary_tile_name} (Frame {primary_tile_frame})"
         elif comp0.is_present and comp0.sprite_frame_index >= 200:
             primary_tile_label = f"Mask (Frame {comp0.sprite_frame_index})"

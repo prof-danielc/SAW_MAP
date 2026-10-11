@@ -101,16 +101,34 @@ def generate_minimap_image(
                     asset = tileset.resolve_flat_asset(cell0.floor.tileset_group_index) if tileset else None
                     color = get_surface_color(asset, has_snow_context=has_snow)
 
-            # Check if any layer up to active layer has walls or structures
-            has_wall = False
+            # Check if any layer up to active layer has walls or clutter objects (planes, trees, vehicles)
+            object_color: Optional[Tuple[int, int, int]] = None
             for z in range(max_z + 1):
                 cell_z = map_doc.get_cell(x, y, z)
-                if cell_z and (cell_z.left_wall.is_present or cell_z.right_wall.is_present):
-                    has_wall = True
-                    break
+                if not cell_z:
+                    continue
+                if cell_z.has_clutter_object and tileset:
+                    c_asset = tileset.resolve_flat_asset(cell_z.clutter_object_group)
+                    if c_asset:
+                        c_low = c_asset.lower()
+                        if "plane" in c_low:
+                            object_color = (130, 140, 155)  # German transport aircraft
+                            break
+                        elif "tree" in c_low:
+                            object_color = (35, 75, 30)  # Evergreen winter trees
+                            break
+                        elif any(k in c_low for k in ("vehic", "gun", "filler", "wrhouse", "sandbag")):
+                            object_color = (65, 70, 75)  # Military vehicles and installations
+                            break
+                if (
+                    cell_z.left_wall.is_present
+                    or cell_z.right_wall.is_present
+                    or (cell_z.floor.is_present and 13 <= cell_z.floor.tileset_group_index <= 36)
+                ):
+                    object_color = (45, 45, 50)  # Walls and fences
 
-            if has_wall:
-                color = (45, 45, 50)
+            if object_color is not None:
+                color = object_color
             elif color is None:
                 for z in range(1, max_z + 1):
                     cell_z = map_doc.get_cell(x, y, z)

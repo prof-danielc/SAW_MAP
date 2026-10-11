@@ -179,6 +179,8 @@ class AssetLoader(IAssetLoader):
         archive = self.get_sprite_archive(clean_name)
         if archive:
             frame = archive.get_frame(frame_index)
+            if not frame and archive.frames:
+                frame = archive.get_frame(frame_index % len(archive.frames)) or archive.get_frame(0)
             if frame:
                 if cache_key in self._rgba_cache:
                     img = self._rgba_cache[cache_key]

@@ -69,22 +69,44 @@ class MapCell:
     elevation_attr: int = 0
     flags: int = 0
 
+    @property
+    def has_clutter_object(self) -> bool:
+        """True if cell flags indicate a placed visual clutter object (bit 31 set and group > 0)."""
+        return bool(((self.flags >> 31) & 1) and (((self.flags >> 24) & 0x7F) > 0))
+
+    @property
+    def clutter_object_group(self) -> int:
+        """Tileset group index of clutter object in flat registry (37..N)."""
+        return (self.flags >> 24) & 0x7F
+
+    @property
+    def roof_cutoff_layer(self) -> int:
+        """Elevation cutoff layer for roof/ceiling geometry encoded in flags bits 18..20."""
+        return (self.flags >> 18) & 7
+
+    @property
+    def clutter_object_frame(self) -> int:
+        """Sprite frame index of clutter object within its archive."""
+        return self.floor.raw_word & 0x7F
+
     def is_empty(self) -> bool:
-        """Returns True if none of the 4 components are active/present."""
+        """Returns True if none of the 4 components and no clutter object are active/present."""
         return not (
             self.floor.is_present
             or self.left_wall.is_present
             or self.right_wall.is_present
             or self.clutter.is_present
+            or self.has_clutter_object
         )
 
     def has_visual_content(self) -> bool:
-        """Returns True if any component has an active renderable sprite (frame < 200)."""
+        """Returns True if any component has an active renderable sprite or clutter object."""
         return (
-            (self.floor.is_present and self.floor.sprite_frame_index < 200)
-            or (self.left_wall.is_present and self.left_wall.sprite_frame_index < 200)
-            or (self.right_wall.is_present and self.right_wall.sprite_frame_index < 200)
-            or (self.clutter.is_present and self.clutter.sprite_frame_index < 200)
+            (self.floor.is_present and (self.floor.sprite_frame_index < 200 or self.floor.tileset_group_index > 0))
+            or (self.left_wall.is_present and (self.left_wall.sprite_frame_index < 200 or self.left_wall.tileset_group_index > 0))
+            or (self.right_wall.is_present and (self.right_wall.sprite_frame_index < 200 or self.right_wall.tileset_group_index > 0))
+            or (self.clutter.is_present and (self.clutter.sprite_frame_index < 200 or self.clutter.tileset_group_index > 0))
+            or self.has_clutter_object
         )
 
     def get_component(self, comp_type: ComponentType) -> CellComponent:

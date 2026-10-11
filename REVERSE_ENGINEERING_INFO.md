@@ -209,11 +209,12 @@ Binary inspection of all 91,000 cells in `Airfield.map` and decompiled drawing r
      - Group 3 (`sdirt`), Group 4 (`sstone1` / hangar floor), Group 9 (`strack2` / railway).
 2. **Ceiling / Roof / Cut-Away Mask (`word0` / Offset `+0`)**:
    - `word0` contains ceiling and roof components, rendered in `sub_4508F9` only when `((flags >> 18) & 7) > word_8AED06` (current elevation slicing layer).
-   - At ground level (elevation 0), `word0` values like `0xFE00` and `0xFF93` carry frame numbers `254` and `255`, representing roof height boundaries rather than drawable sprites (`frame >= 200` are culled).
-3. **Walls (`word1` & `word2` / Offsets `+2`, `+4`)**:
-   - Bit 15 indicates wall presence (`1 = Present`, `0 = Absent`). Passability/LOS masks (e.g., `0x001F`) have Bit 15 = 0.
-4. **Post-Grid Map Clutter**:
-   - Editor-placed clutter objects (trees `snwtree1`, hangars, planes `cplane1`, vehicles, barbed wire fences `lbarb`/`rbarb`) are stored in the post-grid records following the $7 \times 100 \times 130 \times 13$ array.
+   - At ground level (elevation 0), `word0` values like `0xFE00` and `0xFF93` with surface group 0 carry frame numbers `254` and `255`, representing roof height boundaries rather than drawable sprites (`frame >= 200` are culled for surface group 0).
+3. **Walls & Fences (`word0`, `word1`, `word2`)**:
+   - Stored in structural component words. Groups 13..24 are Left Walls (including `lbarb` fence at group 20) and Groups 25..36 are Right Walls (including `rbarb` fence at group 32).
+   - In original maps, wall words frequently store frame `254` (`0xFE`) or `255` (`0xFF`), signifying an intact base wall structure. The engine draws these using frame 0 of the corresponding wall `.obj` archive.
+4. **Clutter & Map Objects (`dword5` / `flags` and `word0`)**:
+   - Placed map clutter objects (trees `snwtree1`, airplanes `cplane1`/`cplane2`, vehicles `cvehic2`, guns `cgun1`, crates `cfiller`/`cfiller3`, hangars `cwrhouse`, snowdrifts `csnow2`) are encoded directly in the cell's 32-bit `dword5` flags field, with their sprite frame index stored in `word0 & 0x7F`.
 
 ---
 
@@ -234,12 +235,67 @@ Raw Bytes: 93 FF 00 00 1F 00 82 81 01 00 00 00 25
   - Group Index (Bits 0..6): `0x8182 & 0x7F = 2` $\rightarrow$ `Airfield.set` Surface 2 = **`ssnow1.obj`**
   - Frame Index (Bits 7..14): `(0x8182 >> 7) & 0xFF = 3` $\rightarrow$ **Sprite Frame 3**
 - `byte4 = 0x01` (Elevation / terrain attribute)
-- `dword5 = 0x25000000` (Flags)
+- `dword5 = 0x25000000` (Flags: presence bit 31 = 0, footprint only)
 
 #### 2. Visual Alignment with Editor Screenshots:
 - In `Research/EditorScreenshots/airfield_tile_20_18_0_level_0.png`, the wireframe cursor box hovers over $(20, 18, 0)$ displaying snow with a small curved ridge at the bottom of the diamond.
 - In `Research/EditorScreenshots/airfield_tile_20_18_0_level_0_tile_window.png`, the tile options window highlights this specific snow ridge tile.
 - In `Research/EditorScreenshots/airfield_tile_20_18_0_level_0_tile.png`, the isolated sprite is an exact pixel-level match to Frame 3 of `ssnow1.obj` (`width=128, height=63, ox=209, oy=322`).
+
+---
+
+### 3.7 Clutter & Macro Objects Encoding (`dword5` & `word0`)
+
+Detailed reverse engineering of `sub_43948B`, `sub_4508F9`, and `sub_43505D` revealed the exact mechanism by which Soldiers at War stores and renders map objects:
+
+```
+dword5 (flags / cell + 12):
+Bit 31              Bits 30 .. 24               Bits 23 .. 0
++-------------------+---------------------------+---------------------------+
+| Object Visible    | Object Group Index (0..127)| Collision / Movement /    |
+| (1 = Draw Sprite) | (e.g. 58=cplane1, 37=tree)| Trigger / Height Masks    |
++-------------------+---------------------------+---------------------------+
+
+word0 (raw_word / cell + 0):
+Bits 15 .. 7        Bits 6 .. 0 (LSB)
++-------------------+---------------------------+
+| Roof / Attr Mask  | Object Sprite Frame Index |
+| (0x00 or 0xFF)    | (0 .. 127 in .obj file)   |
++-------------------+---------------------------+
+```
+
+1. **Presence Bit (Bit 31)**:
+   - `(dword5 >> 31) & 1`: When equal to `1`, a visible sprite is placed at this cell. When `0`, the cell represents an object's footprint or collision volume without drawing a duplicate sprite.
+2. **Object Group Index (Bits 24..30)**:
+   - `(dword5 >> 24) & 0x7F`: Indexes directly into the companion `.set` file's flat registry `dword_7C58B0`:
+     - `Airfield.set` clutter objects (indices 37..64):
+       - `37`: `snwtree1` (Evergreen snow trees) — 1,815 cells in `Airfield.map`
+       - `39`: `csnow1` (Snow clutter) — 566 cells
+       - `58`: `cplane1` (German transport aircraft pieces) — 101 cells
+       - `59`: `cplane2` (German transport aircraft pieces) — 151 cells
+       - `60`: `csnow2` (Snowdrifts) — 139 cells
+       - `47`: `cfiller3` (Barrels and crates) — 63 cells
+       - `54`: `cgun1` (88mm Flak / AA gun pieces) — 48 cells
+       - `57`: `cvehic2` (German military trucks) — 45 cells
+       - `46`: `cfiller` (Supply crates) — 40 cells
+       - `48`: `cwrhouse` (Airfield hangars) — 13 cells
+3. **Sprite Frame Index (`word0 & 0x7F`)**:
+   - When a clutter object is active (`(dword5 >> 31) & 1`), `word0 & 0x7F` supplies the sprite frame index within the target `.obj` archive.
+   - For example, for German transport planes (`cplane1`/`cplane2`), multi-tile fuselage, wings, engines, and tail components use frames 0, 1, 2, 4, 14, etc.
+   - For AA guns (`cgun1`), frames 0, 1, 2, 3, 4 represent barrel, mount, and gun base.
+   - For winter trees (`snwtree1`), frame 0 is the evergreen pine, while frames 1, 2, 13, 19, 20 represent branch sections and canopy variations across elevation layers.
+
+---
+
+### 3.8 Wall & Fence Object Encoding (`word0` Frames 254/255)
+
+In `Airfield.map`, there are 1,614 wall and fence segments stored across `word0`:
+- **Left Barbed Wire Fence (`lbarb`)**: Group 20 (`Airfield.set`)
+- **Right Barbed Wire Fence (`rbarb`)**: Group 32
+- **Left Wooden Wall (`lwood1`)**: Group 13
+- **Left Girder / Beam (`lbeam2`)**: Group 19
+
+In the raw binary cell records, intact wall objects are saved with `word0 = 0xFF94` or `0xFF14`, which translates to `sprite_frame_index = 254` or `255`. In the game engine, `frame >= 200` on wall components designates the full-health base sprite (Frame 0), while lower frame numbers denote damaged or destroyed variations. Re-mapping frames 254/255 to frame 0 for wall groups allows all perimeter fences, pens, and hangars to be correctly rendered.
 
 ---
 
