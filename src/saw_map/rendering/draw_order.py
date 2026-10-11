@@ -51,6 +51,7 @@ class DrawOrderStrategy:
         show_clutter: bool = True,
         show_entities: bool = True,
         show_markers: bool = False,
+        show_effects: bool = True,
     ) -> List[RenderItem]:
         """Collects, filters, and depth-sorts all visible components in the map document.
 
@@ -65,6 +66,7 @@ class DrawOrderStrategy:
             show_clutter: Objects and clutter visibility toggle.
             show_entities: Placed entities (soldiers, tokens, info items, ...) visibility toggle.
             show_markers: Editor markers derived from cell flags visibility toggle.
+            show_effects: Fire, fog and smoke clouds derived from cell flags visibility toggle.
 
         Returns:
             Sorted list of RenderItem instances ready for drawing back-to-front.
@@ -124,7 +126,15 @@ class DrawOrderStrategy:
             if entity.category == EntityCategory.MARKER:
                 if not show_markers:
                     continue
+            elif entity.category == EntityCategory.EFFECT:
+                if not show_effects:
+                    continue
             elif not show_entities or entity.attributes.get("hidden"):
+                continue
+
+            # Entities without a sprite of their own (items held in a canister) are drawn
+            # by their container; they stay listed in the inspector only.
+            if entity.sprite_archive is None:
                 continue
 
             if isolated_layer is not None:

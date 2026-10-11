@@ -23,7 +23,7 @@ The tool parses original binary `.map` files, companion `.set` definitions, `.ob
   - Slicing and isolation of elevation layers ($0 \dots 6$).
   - Per-component visibility filtering (Floors, Left Walls, Right Walls, Clutter/Objects).
   - Engine-accurate floor culling: floors hidden under a higher level reappear as the view level is lowered.
-  - Placed entities drawn with their original sprites, named after the Scenario Builder modes: soldiers (`People.obj`), their alternate positions (dice), reinforcement tokens and information tokens (`Token.obj`), items / canisters (`Can.obj`), and active turrets (`Turret.obj`); editor markers (mission exits, land mines, medical, lockable, multiplayer) can be shown separately.
+  - Placed entities drawn with their original sprites, named after the Scenario Builder modes: soldiers (`People.obj`), their alternate positions (dice), reinforcement tokens and information tokens (`Token.obj`), items / canisters (`Can.obj`), and active turrets (`Turret.obj`); editor markers (mission exits, land mines, medical, lockable, multiplayer) can be shown separately. Fog, smoke and fire clouds stored in cell flags are drawn as the game draws them.
   - Instant perspective toggling between Dimetric Isometric and 2D Top-Down.
   - Hot-swapping between daylight (`Win.pal`) and night/ambient (`Darkpal.col`) color palettes.
 - **Inspection Tools & Overlays**:
@@ -150,6 +150,7 @@ The visualizer provides a unified set of controls across both the Arcade and Pyg
 | <kbd>4</kbd> | **Toggle Clutter / Objects** | Show or hide clutter and object components (`word3`) |
 | <kbd>5</kbd> | **Toggle Entities** | Show or hide placed soldiers, alternate positions, reinforcement tokens, information tokens, canisters, and turrets |
 | <kbd>6</kbd> | **Toggle Editor Markers** | Show or hide the Scenario Builder markers stored in cell flags: mission exits, land mines, medical, lockable, multiplayer (off by default) |
+| <kbd>7</kbd> | **Toggle Fog / Smoke / Fire** | Show or hide the fog, smoke and fire clouds stored in cell flags (on by default) |
 
 ---
 

@@ -134,7 +134,7 @@ lines 47–49 the playable width, height, and a number that changes on every sav
 | 10 | A reinforcement token is on the cell |
 | 23 | Lockable |
 | 24–26 | Multiplayer marker 1–4 |
-| 28–30 | Area effect marker (purpose unknown) |
+| 28–30 | Area effect: 1–4 fire, 5 fog, 6 smoke, 7 fog and smoke (drawn as `Token.obj` frame value + 12) |
 | 31 | Medical |
 | 18–20 | Floor cover level (section 1.5) |
 

@@ -36,6 +36,7 @@ class InputAction(str, Enum):
     TOGGLE_CLUTTER = "TOGGLE_CLUTTER"
     TOGGLE_ENTITIES = "TOGGLE_ENTITIES"
     TOGGLE_MARKERS = "TOGGLE_MARKERS"
+    TOGGLE_EFFECTS = "TOGGLE_EFFECTS"
     CYCLE_PALETTE = "CYCLE_PALETTE"
     TOGGLE_FULLSCREEN = "TOGGLE_FULLSCREEN"
     EXIT = "EXIT"
@@ -218,6 +219,10 @@ class InputHandler:
 
         elif action == InputAction.TOGGLE_MARKERS:
             cam.show_markers = not cam.show_markers
+            self._redraw()
+
+        elif action == InputAction.TOGGLE_EFFECTS:
+            cam.show_effects = not cam.show_effects
             self._redraw()
 
         elif action == InputAction.CYCLE_PALETTE:

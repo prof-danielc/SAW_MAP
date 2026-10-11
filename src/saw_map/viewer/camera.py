@@ -27,6 +27,7 @@ class Camera:
     show_clutter: bool = True
     show_entities: bool = True
     show_markers: bool = False
+    show_effects: bool = True
     perspective: ViewPerspective = ViewPerspective.ISOMETRIC
     show_minimap: bool = True
     show_sidebar: bool = False

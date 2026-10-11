@@ -10,7 +10,7 @@ from collections import Counter
 from typing import List, Optional, Sequence, Tuple
 
 from saw_map.maps.model import MapDocument, TilesetDefinition
-from saw_map.maps.records import EntityCategory, PlacedEntity
+from saw_map.maps.records import CELL_MARK_CATEGORIES, EntityCategory, PlacedEntity
 from saw_map.viewer.camera import Camera
 from saw_map.viewer.inspector import CellInspector
 
@@ -51,7 +51,7 @@ class OverlayModel:
                 info = CellInspector.inspect_cell(cell, tileset)
                 if info.primary_tile_name:
                     tile_info = f" [{info.primary_tile_name}:{info.primary_tile_frame}]"
-            placed = [e for e in map_doc.entities_at(hx, hy, hz) if e.category != EntityCategory.MARKER]
+            placed = [e for e in map_doc.entities_at(hx, hy, hz) if e.category not in CELL_MARK_CATEGORIES]
             if placed:
                 tile_info += f" <{placed[0].label}>"
             parts.append(f"Hover: ({hx}, {hy}, {hz}){tile_info}")
@@ -129,7 +129,8 @@ class OverlayModel:
             "   ".join(parts[:3]),
             "   ".join(parts[3:5]),
             "   ".join(parts[5:]),
-            f"Editor Markers: {counts[EntityCategory.MARKER]}   Anomalies: {anomalies}",
+            f"Editor Markers: {counts[EntityCategory.MARKER]}   Fog / Smoke / Fire Cells: "
+            f"{counts[EntityCategory.EFFECT]}   Anomalies: {anomalies}",
         ]
 
     @staticmethod

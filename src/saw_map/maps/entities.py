@@ -96,6 +96,20 @@ REINFORCEMENT_LABELS: Dict[int, str] = {
     9: "Neutral reinforcement",
 }
 
+# Area effects (cell flags bits 28..30), drawn by the game as Token.obj frame value + 12.
+# 5..7 are the clouds the game's sub_4592FF combines (smoke on fog gives 7); 1..4 are the
+# four fire sprites (stage order is a hypothesis).
+AREA_EFFECT_LABELS: Dict[int, str] = {
+    1: "fire (stage 1)",
+    2: "fire (stage 2)",
+    3: "fire (stage 3)",
+    4: "fire (stage 4)",
+    5: "fog",
+    6: "smoke",
+    7: "fog and smoke",
+}
+AREA_EFFECT_FRAME_BASE = 12
+
 ANOMALY_OUTSIDE_WINDOW = "outside playable window"
 ANOMALY_NO_CELL_FLAG = "cell flag not set"
 
@@ -423,7 +437,19 @@ def _cell_flag_entities(cells: Iterable[MapCell]) -> List[PlacedEntity]:
 
         effect = (flags >> 28) & 7
         if effect:
-            result.append(_marker(cell, effect + 12, f"area effect {effect}"))
+            result.append(
+                PlacedEntity(
+                    category=EntityCategory.EFFECT,
+                    x=cell.x,
+                    y=cell.y,
+                    z=cell.z,
+                    source="cell flags",
+                    label=AREA_EFFECT_LABELS[effect],
+                    sprite_archive=ARCHIVE_TOKEN,
+                    sprite_frame=effect + AREA_EFFECT_FRAME_BASE,
+                    attributes={"area_effect": effect},
+                )
+            )
     return result
 
 

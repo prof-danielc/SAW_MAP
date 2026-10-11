@@ -70,6 +70,7 @@ _KEY_ACTIONS: Dict[int, InputAction] = {
     arcade.key.KEY_4: InputAction.TOGGLE_CLUTTER,
     arcade.key.KEY_5: InputAction.TOGGLE_ENTITIES,
     arcade.key.KEY_6: InputAction.TOGGLE_MARKERS,
+    arcade.key.KEY_7: InputAction.TOGGLE_EFFECTS,
     arcade.key.P: InputAction.CYCLE_PALETTE,
     arcade.key.F11: InputAction.TOGGLE_FULLSCREEN,
     arcade.key.F: InputAction.TOGGLE_FULLSCREEN,
@@ -297,6 +298,7 @@ class ArcadeRenderer(IRenderer):
             show_clutter=self.camera.show_clutter,
             show_entities=self.camera.show_entities,
             show_markers=self.camera.show_markers,
+            show_effects=self.camera.show_effects,
         )
 
         is_iso = self.camera.perspective == ViewPerspective.ISOMETRIC
@@ -743,6 +745,7 @@ class ArcadeRenderer(IRenderer):
                     ("  [1-4] Toggle Layers", (150, 155, 165), False),
                     ("  [5] Toggle Entities", (150, 155, 165), False),
                     ("  [6] Toggle Editor Markers", (150, 155, 165), False),
+                    ("  [7] Toggle Fog / Smoke / Fire", (150, 155, 165), False),
                     ("  [G] Toggle Cell Grid", (150, 155, 165), False),
                     ("  [P] Cycle Palette", (150, 155, 165), False),
                 ]

@@ -22,7 +22,7 @@ from saw_map.maps.model import (
     MapCell,
     MapDocument,
 )
-from saw_map.maps.records import EntityCategory, PostTileData
+from saw_map.maps.records import CELL_MARK_CATEGORIES, EntityCategory, PostTileData
 
 logger = get_logger("formats.map_reader")
 
@@ -207,7 +207,7 @@ class MapReader:
         )
         map_doc.set_entities(extract_entities(map_doc))
         if post_tile.is_decoded:
-            placed = [e for e in map_doc.entities if e.category != EntityCategory.MARKER]
+            placed = [e for e in map_doc.entities if e.category not in CELL_MARK_CATEGORIES]
             logger.info(
                 f"Post-tile records decoded: {len(post_tile.tables)} tables, {len(placed)} placed entities"
             )

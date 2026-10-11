@@ -11,7 +11,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from saw_map.geometry.transform import IsometricTransform, TopDownTransform
 from saw_map.maps.model import MapCell, MapDocument, TilesetDefinition
-from saw_map.maps.records import EntityCategory, PlacedEntity
+from saw_map.maps.records import CELL_MARK_CATEGORIES, EntityCategory, PlacedEntity
 from saw_map.viewer.camera import Camera, ViewPerspective
 
 
@@ -108,7 +108,7 @@ class CellInspector:
         cell = map_doc.get_cell(x, y, z)
         if cell and cell.has_visual_content():
             return True
-        return any(e.category != EntityCategory.MARKER for e in map_doc.entities_at(x, y, z))
+        return any(e.category not in CELL_MARK_CATEGORIES for e in map_doc.entities_at(x, y, z))
 
     def pick_cell(
         self,

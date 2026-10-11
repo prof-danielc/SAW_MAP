@@ -246,7 +246,7 @@ def test_cell_flag_entities():
 
     assert [(e.label, e.sprite_frame) for e in doc.entities_at(21, 20, 0)] == [("mission exit", 6)]
     assert [(e.label, e.sprite_frame) for e in doc.entities_at(22, 20, 0)] == [("land mine", 4), ("multiplayer marker 3", 2)]
-    assert [(e.label, e.sprite_frame) for e in doc.entities_at(23, 20, 0)] == [("medical", 10), ("area effect 5", 17)]
+    assert [(e.label, e.sprite_frame) for e in doc.entities_at(23, 20, 0)] == [("medical", 10), ("fog", 17)]
     assert doc.entities_at(24, 20, 0) == []
 
 
@@ -271,12 +271,21 @@ def test_draw_order_entity_filters():
     assert kinds == [
         (0, ComponentType.FLOOR, None),
         (0, ComponentType.ENTITY, "People"),
-        (0, ComponentType.ENTITY, None),      # item without sprite -> placeholder marker
         (2, ComponentType.FLOOR, None),
         (2, ComponentType.ENTITY, "Token"),
     ]
+    # The item has no sprite of its own (its canister draws it): it is not in the render list
+    assert all(it.entity is None or it.entity.category != EntityCategory.ITEM for it in items)
     assert items[1].entity is doc.entities[0] and items[1].component is None
     assert items[1].sprite_frame_index == 88
+
+    # Fog is drawn by default, with its own toggle, and is not pickable through the air
+    fog_doc = entity_doc()
+    fog_doc.set_entities([PlacedEntity(EntityCategory.EFFECT, 30, 30, 3, "cell flags", -1, "fog", "Token", 17)])
+    assert [(it.grid_z, it.asset_name, it.sprite_frame_index) for it in DrawOrderStrategy.generate_render_list(fog_doc)
+            if it.entity] == [(3, "Token", 17)]
+    assert not any(it.entity for it in DrawOrderStrategy.generate_render_list(fog_doc, show_effects=False))
+    assert any(it.entity for it in DrawOrderStrategy.generate_render_list(fog_doc, show_entities=False))
 
     # Markers are off by default and independent of the entity toggle
     with_markers = DrawOrderStrategy.generate_render_list(doc, show_markers=True)

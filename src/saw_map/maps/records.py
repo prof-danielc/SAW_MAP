@@ -70,7 +70,8 @@ class EntityCategory(str, Enum):
     ("Relocate Char.", the alternate cell of a soldier, shown as a dice), TOKEN
     (reinforcement tokens), INFO ("Info" items, shown as a folder), CANISTER
     ("Item" / "Canister" objects drawn from Can.obj), TURRET ("Turrent"), ITEM (item
-    pool slots carrying a cell), and MARKER (editor markers stored in cell flags).
+    pool slots carrying a cell), MARKER (editor markers stored in cell flags), and
+    EFFECT (fire, fog and smoke clouds stored in cell flags, which the game itself draws).
     """
     SOLDIER = "SOLDIER"
     RELOCATION = "RELOCATION"
@@ -80,6 +81,11 @@ class EntityCategory(str, Enum):
     TURRET = "TURRET"
     ITEM = "ITEM"
     MARKER = "MARKER"
+    EFFECT = "EFFECT"
+
+
+# Categories read from single cell flags; they mark cells rather than place objects
+CELL_MARK_CATEGORIES = frozenset({EntityCategory.MARKER, EntityCategory.EFFECT})
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,7 +204,7 @@ class PlacedEntity:
         source: Where it was decoded from (table id, or "cell flags").
         slot_index: Slot in the source table, or -1 for cell-flag entities.
         label: Short human-readable description.
-        sprite_archive: Archive that draws it, when established; None draws a marker.
+        sprite_archive: Archive that draws it, when established; None is not drawn (inspector only).
         sprite_frame: Frame within the archive.
         attributes: Further decoded properties.
         anomalies: Problems found while decoding (e.g. outside the playable window).

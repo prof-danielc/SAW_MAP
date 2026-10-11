@@ -10,7 +10,7 @@ from collections import Counter
 from typing import Any, List
 
 from saw_map.maps.model import MapDocument
-from saw_map.maps.records import EntityCategory, FieldKind, FieldSpec, Record, RecordTable
+from saw_map.maps.records import CELL_MARK_CATEGORIES, EntityCategory, FieldKind, FieldSpec, Record, RecordTable
 
 # Long word arrays are abbreviated to this many leading values
 _ARRAY_PREVIEW = 12
@@ -86,7 +86,7 @@ def format_records_report(map_doc: MapDocument, include_unused: bool = False) ->
         lines.append("")
         lines.extend(_format_table(table, include_unused))
 
-    placed = [e for e in map_doc.entities if e.category != EntityCategory.MARKER]
+    placed = [e for e in map_doc.entities if e.category not in CELL_MARK_CATEGORIES]
     markers = Counter(e.label for e in map_doc.entities if e.category == EntityCategory.MARKER)
     lines.extend(["", f"PLACED ENTITIES: {len(placed)}"])
     for entity in placed:
@@ -101,6 +101,11 @@ def format_records_report(map_doc: MapDocument, include_unused: bool = False) ->
 
     lines.append(f"EDITOR MARKERS (cell flags): {sum(markers.values())}")
     for label, count in sorted(markers.items()):
+        lines.append(f"  {label}: {count} cells")
+
+    effects = Counter(e.label for e in map_doc.entities if e.category == EntityCategory.EFFECT)
+    lines.append(f"AREA EFFECTS (cell flags): {sum(effects.values())}")
+    for label, count in sorted(effects.items()):
         lines.append(f"  {label}: {count} cells")
 
     lines.append(f"ANOMALIES: {sum(1 for e in map_doc.entities if e.anomalies)}")

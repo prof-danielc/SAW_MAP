@@ -71,6 +71,7 @@ _KEY_ACTIONS: Dict[int, InputAction] = {
     pygame.K_4: InputAction.TOGGLE_CLUTTER,
     pygame.K_5: InputAction.TOGGLE_ENTITIES,
     pygame.K_6: InputAction.TOGGLE_MARKERS,
+    pygame.K_7: InputAction.TOGGLE_EFFECTS,
     pygame.K_p: InputAction.CYCLE_PALETTE,
     pygame.K_F11: InputAction.TOGGLE_FULLSCREEN,
     pygame.K_f: InputAction.TOGGLE_FULLSCREEN,
@@ -267,6 +268,7 @@ class PygameRenderer(IRenderer):
             show_clutter=self.camera.show_clutter,
             show_entities=self.camera.show_entities,
             show_markers=self.camera.show_markers,
+            show_effects=self.camera.show_effects,
         )
 
         center_x = self.width / 2.0 + (self.camera.x * self.camera.zoom)
@@ -563,6 +565,7 @@ class PygameRenderer(IRenderer):
                 "  [1-4] Toggle Layers",
                 "  [5] Toggle Entities",
                 "  [6] Toggle Editor Markers",
+                "  [7] Toggle Fog / Smoke / Fire",
                 "  [G] Toggle Cell Grid",
                 "  [P] Cycle Palette",
             ]

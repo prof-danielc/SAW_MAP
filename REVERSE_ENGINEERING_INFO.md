@@ -327,7 +327,7 @@ placement handler (lines 39380–39800) and the mode-name switch (lines 79854–
 | 18–20 | Floor cover level | see above | Confirmed rule |
 | 23 | **Lockable** (editor mode 23) | `Token.obj` frame 12 (padlock) | Confirmed |
 | 24–26 | **Multiplayer** marker $n$ = 1–4 (editor modes 25–28) | `Token.obj` frame $n - 1$ (soldier icons 1–4) | Confirmed; presumably the start cells of players 1–4 |
-| 28–30 | Area effect $n$ (5 seen) | `Token.obj` frame $n + 12$ (fire, smoke, cloud sprites) | Confirmed draw; purpose unknown |
+| 28–30 | Area effect $n$: 1–4 fire, 5 fog, 6 smoke, 7 fog and smoke (only 5 is stored in shipped maps) | `Token.obj` frame $n + 12$, drawn by the game itself (`SAW_Game` `sub_443123`) after the cell's clutter and canister | Draw confirmed; names from the sprites and `sub_4592FF` (hypothesis for the fire stages) |
 | 31 | **Medical** (editor mode 17) | `Token.obj` frame 10 (red cross) | Confirmed |
 
 A cell with bit 5 and no soldier standing on it is a character's **alternate cell**: there
@@ -988,7 +988,7 @@ Scenario Builder, saving under a new name, and comparing the decompressed stream
 | Flag bit 1 | Triggers the extra call `sub_43CCF8` after the floor is drawn; never set in any of the 96 shipped maps | Unknown (probably a run-time flag) | Decompile `sub_43CCF8` |
 | Flag bit 8 | Walls and clutter are drawn through `sub_4447D5` instead of `sub_451610`; set in 101 cells | Unknown purpose | Decompile `sub_4447D5`; look at the 101 cells |
 | Flag bits 16–17 | Set in all but about 880 of the 8,736,000 cells of the 96 maps | Unknown | Look at the cells where they are clear; find the code that clears them |
-| Flag bits 28–30 (area effect) | Draw `Token.obj` frame $n + 12$ (fire, smoke, cloud); only the value 5 occurs (5,080 cells) | Draw confirmed; game purpose unknown | Find the editor mode that sets them |
+| Flag bits 28–30 (area effect) | Value 5 is fog (5,080 cells, e.g. 945 on levels 1–5 of Anzio); the game draws `Token.obj` frame $n + 12$ on every such cell. `sub_4592FF` sets the value at run time (setting 6 on a cell holding 5 or 7 gives 7) and `sub_4594FC` maps 5 / 6 / 7 to 2 / 3 / 4; the minimap routine (line 54854 of `SAW_Game_NOTES.c`) paints cells holding 1–4 with a randomly varied palette colour, which fits fire (hypothesis) | Draw confirmed; effect on sight not traced | Trace the callers of `sub_4594FC` (probably a sight penalty); confirm fire stages 1–4 |
 | Flag bits 2, 3, 11, 21, 22, 27 | Never set in any of the 96 shipped maps | Presumed unused or run-time only | None needed |
 | Line-of-sight and movement flags | None identified; they may be derived from the tile sprites rather than stored | Unknown | Trace the path-finding and visibility routines |
 | Black-out mask (`byte4`) | Only `0xFF` and `0x00` occur; set by editor mode 21 | Meaning of the eight bits and the reveal rule unknown | Controlled edit with the Black Out mode; trace the readers |
