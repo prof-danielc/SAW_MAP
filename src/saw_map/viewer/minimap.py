@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import FrozenSet, List, Optional, Tuple
 
 from PIL import Image
 
 from saw_map.geometry.transform import IsometricTransform, TopDownTransform
 from saw_map.maps.model import MapDocument, TilesetDefinition
+from saw_map.maps.records import EntityCategory, PlacedEntity
 from saw_map.viewer.camera import Camera, ViewPerspective
 
 
@@ -17,6 +18,85 @@ class MinimapBounds:
     top: float
     width: float
     height: float
+
+
+# Soldier marker colors
+ALLIED_COLOR: Tuple[int, int, int] = (60, 225, 80)
+ENEMY_COLOR: Tuple[int, int, int] = (240, 60, 60)
+CIVILIAN_COLOR: Tuple[int, int, int] = (70, 150, 255)
+
+# Nationality codes of the soldier record, grouped by side
+_ALLIES: FrozenSet[int] = frozenset({1, 8})  # American, French
+_AXIS: FrozenSet[int] = frozenset({2, 16})  # German, Italian
+_NEUTRAL = 4
+_HUMAN = "Human"
+
+
+@dataclass(slots=True)
+class MinimapMarker:
+    """A soldier dot on the minimap, in cells relative to the playable window origin."""
+    x: int
+    y: int
+    color: Tuple[int, int, int]
+
+
+def _is_civilian(entity: PlacedEntity) -> bool:
+    """Neutral characters and characters with a civilian body type."""
+    if entity.attributes.get("nationality") == _NEUTRAL:
+        return True
+    return "civilian" in str(entity.attributes.get("appearance", "")).lower()
+
+
+def _player_side(soldiers: List[PlacedEntity]) -> FrozenSet[int]:
+    """Nationalities fighting on the player's side.
+
+    The side is taken from the human-controlled soldiers; a map without any is
+    read as an Allied mission.
+    """
+    human = {s.attributes.get("nationality") for s in soldiers if s.attributes.get("controller") == _HUMAN}
+    side: FrozenSet[int] = frozenset()
+    if human & _ALLIES:
+        side |= _ALLIES
+    if human & _AXIS:
+        side |= _AXIS
+    return side or _ALLIES
+
+
+def get_minimap_markers(
+    map_doc: MapDocument,
+    active_layer: Optional[int] = None,
+    isolated_layer: Optional[int] = None,
+) -> List[MinimapMarker]:
+    """Returns soldier dots: allied green, enemy red, civilian blue.
+
+    Soldiers the game does not draw (hidden flag), soldiers outside the playable
+    window, and soldiers above the visible levels are left out. Allied dots come
+    last so they are drawn on top.
+    """
+    max_z = active_layer if active_layer is not None else (map_doc.layer_count - 1)
+    soldiers = [e for e in map_doc.entities if e.category == EntityCategory.SOLDIER]
+    player_side = _player_side(soldiers)
+
+    civilians: List[MinimapMarker] = []
+    enemies: List[MinimapMarker] = []
+    allies: List[MinimapMarker] = []
+    for soldier in soldiers:
+        if soldier.attributes.get("hidden") or not map_doc.contains(soldier.x, soldier.y):
+            continue
+        if isolated_layer is not None:
+            if soldier.z != isolated_layer:
+                continue
+        elif soldier.z > max_z:
+            continue
+        px = soldier.x - map_doc.origin_x
+        py = soldier.y - map_doc.origin_y
+        if _is_civilian(soldier):
+            civilians.append(MinimapMarker(px, py, CIVILIAN_COLOR))
+        elif soldier.attributes.get("nationality") in player_side:
+            allies.append(MinimapMarker(px, py, ALLIED_COLOR))
+        else:
+            enemies.append(MinimapMarker(px, py, ENEMY_COLOR))
+    return civilians + enemies + allies
 
 
 def get_surface_color(asset_name: Optional[str]) -> Tuple[int, int, int]:

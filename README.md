@@ -108,7 +108,7 @@ The visualizer provides a unified set of controls across both the Arcade and Pyg
 
 | Control | Action | Description |
 |---|---|---|
-| <kbd>W</kbd> / <kbd>Up Arrow</kbd> | **Pan Up** | Move the camera up in world space |
+| <kbd>W</kbd> / <kbd>Up Arrow</kbd> | **Pan Up** | Move the camera up in world space; pan keys scroll continuously while held and can be combined for diagonals |
 | <kbd>S</kbd> / <kbd>Down Arrow</kbd> | **Pan Down** | Move the camera down in world space |
 | <kbd>A</kbd> / <kbd>Left Arrow</kbd> | **Pan Left** | Move the camera left in world space |
 | <kbd>D</kbd> / <kbd>Right Arrow</kbd> | **Pan Right** | Move the camera right in world space |
@@ -131,12 +131,13 @@ The visualizer provides a unified set of controls across both the Arcade and Pyg
 | Control | Action | Description |
 |---|---|---|
 | <kbd>Tab</kbd> / <kbd>T</kbd> | **Toggle Perspective** | Switch between Dimetric Isometric (2:1 diamond) and 2D Top-Down |
-| <kbd>M</kbd> | **Toggle Minimap** | Show or hide picture-in-picture minimap overlay |
+| <kbd>M</kbd> | **Toggle Minimap** | Show or hide picture-in-picture minimap overlay. Soldiers appear as dots: allied green, enemy red, civilian blue |
+| <kbd>G</kbd> | **Toggle Cell Grid** | Show or hide the cell grid, painted on the border of every floor sprite, so it follows slopes, raised terrain and roofs and is covered by whatever stands in front |
 | <kbd>I</kbd> | **Toggle Inspector** | Show or hide tile property sidebar |
 | <kbd>F1</kbd> / <kbd>H</kbd> | **Toggle Map Metadata** | Show or hide the map metadata and mission briefing dialog |
 | <kbd>P</kbd> | **Cycle Palette** | Switch between daylight (`Win.pal`) and night/ambient (`Darkpal.col`) |
 | <kbd>F11</kbd> / <kbd>F</kbd> | **Toggle Fullscreen / Maximize** | Toggle window between fullscreen and normal windowed mode |
-| **Mouse Hover** | **Inspect Tile** | The tile under the cursor is highlighted and shown in the status bar and sidebar |
+| **Mouse Hover** | **Inspect Tile** | The tile under the cursor is shown in the status bar and sidebar. Its floor sprite is tinted and outlined, following the sprite's shape; a cell without a floor gets a plain diamond instead |
 | <kbd>Esc</kbd> | **Exit** | Close the application |
 
 ### 4. Structural Component Visibility Filters

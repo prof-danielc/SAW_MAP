@@ -179,3 +179,78 @@ def test_airfield_real_map_objects():
     assert tileset.resolve_flat_asset(plane_cell.floor.tileset_group_index) == "sdirt"
     assert tileset.resolve_flat_asset(plane_cell.clutter.tileset_group_index) == "cplane2"
     assert plane_cell.clutter.sprite_frame_index == 17
+
+
+def test_expand_opaque_edges_grows_sprite_by_one_pixel():
+    """Floor sprites gain a one-pixel border repeating their edge colors, so tiles overlap."""
+    from PIL import Image
+
+    from saw_map.rendering.fallback import EDGE_BLEED, expand_opaque_edges
+
+    sprite = Image.new("RGBA", (4, 3), (0, 0, 0, 0))
+    sprite.putpixel((1, 1), (200, 10, 10, 255))
+    sprite.putpixel((2, 1), (10, 200, 10, 255))
+
+    grown = expand_opaque_edges(sprite)
+    assert EDGE_BLEED == 1 and grown.size == (6, 5)
+    # The original pixels sit one pixel further in
+    assert grown.getpixel((2, 2)) == (200, 10, 10, 255)
+    assert grown.getpixel((3, 2)) == (10, 200, 10, 255)
+    # Their four neighbours repeat the edge color; diagonals and the rest stay transparent
+    assert grown.getpixel((1, 2)) == (200, 10, 10, 255)
+    assert grown.getpixel((2, 1)) == (200, 10, 10, 255)
+    assert grown.getpixel((4, 2)) == (10, 200, 10, 255)
+    assert grown.getpixel((3, 3)) == (10, 200, 10, 255)
+    assert grown.getpixel((1, 1))[3] == 0
+    assert grown.getpixel((0, 0))[3] == 0
+
+
+def test_outline_opaque_edges_paints_only_the_border():
+    """The grid color replaces the opaque pixels that touch transparency or the image edge."""
+    from PIL import Image
+
+    from saw_map.rendering.fallback import GRID_COLOR, outline_opaque_edges
+
+    body = (200, 10, 10, 255)
+    sprite = Image.new("RGBA", (7, 6), (0, 0, 0, 0))
+    for y in range(1, 6):
+        for x in range(1, 6):
+            sprite.putpixel((x, y), body)
+
+    outlined = outline_opaque_edges(sprite)
+    assert outlined.size == sprite.size and sprite.getpixel((1, 1)) == body  # input untouched
+    grid = (*GRID_COLOR, 255)
+    # Border ring of the 5x5 block, including the row that touches the bottom image edge
+    for x in range(1, 6):
+        assert outlined.getpixel((x, 1)) == grid and outlined.getpixel((x, 5)) == grid
+    for y in range(1, 6):
+        assert outlined.getpixel((1, y)) == grid and outlined.getpixel((5, y)) == grid
+    # Interior and transparent pixels are unchanged
+    assert outlined.getpixel((3, 3)) == body and outlined.getpixel((2, 2)) == body
+    assert outlined.getpixel((0, 0))[3] == 0 and outlined.getpixel((6, 3))[3] == 0
+
+
+def test_highlight_opaque_area_tints_and_outlines_the_sprite():
+    """The inspected floor keeps its shape: interior tinted, border in the highlight color."""
+    from PIL import Image
+
+    from saw_map.rendering.fallback import HIGHLIGHT_COLOR, HIGHLIGHT_STRENGTH, highlight_opaque_area
+
+    body = (200, 100, 50, 255)
+    sprite = Image.new("RGBA", (7, 7), (0, 0, 0, 0))
+    for y in range(1, 6):
+        for x in range(1, 6):
+            sprite.putpixel((x, y), body)
+
+    highlighted = highlight_opaque_area(sprite)
+    assert highlighted.size == sprite.size
+    # Border in the plain highlight color, transparent pixels untouched
+    assert highlighted.getpixel((1, 1)) == (*HIGHLIGHT_COLOR, 255)
+    assert highlighted.getpixel((5, 3)) == (*HIGHLIGHT_COLOR, 255)
+    assert highlighted.getpixel((0, 0))[3] == 0
+    # Interior is the sprite color mixed with the highlight color
+    red, green, blue, alpha = highlighted.getpixel((3, 3))
+    assert alpha == 255
+    for got, own, tint in zip((red, green, blue), body, HIGHLIGHT_COLOR):
+        assert abs(got - (own * (1 - HIGHLIGHT_STRENGTH) + tint * HIGHLIGHT_STRENGTH)) <= 1
+

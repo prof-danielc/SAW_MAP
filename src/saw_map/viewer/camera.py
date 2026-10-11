@@ -31,6 +31,7 @@ class Camera:
     show_minimap: bool = True
     show_sidebar: bool = False
     show_metadata: bool = False
+    show_grid: bool = False
 
     MIN_ZOOM: float = 0.25
     MAX_ZOOM: float = 4.0

@@ -4,7 +4,16 @@ import pytest
 from PIL import Image
 from saw_map.maps.model import CellComponent, ComponentType, MapCell, MapDocument, TilesetDefinition
 from saw_map.viewer.camera import Camera, ViewPerspective
-from saw_map.viewer.minimap import MinimapCalculator, generate_minimap_image, get_surface_color
+from saw_map.maps.records import EntityCategory, PlacedEntity
+from saw_map.viewer.minimap import (
+    ALLIED_COLOR,
+    CIVILIAN_COLOR,
+    ENEMY_COLOR,
+    MinimapCalculator,
+    generate_minimap_image,
+    get_minimap_markers,
+    get_surface_color,
+)
 
 
 @pytest.fixture
@@ -175,3 +184,62 @@ def test_minimap_panning_forward_moves_frustum_upward_arcade():
     # In Arcade (Y-up), moving forward towards top of map increases py
     assert center_y_panned > center_y_init
 
+
+
+def _soldier(x, y, z=0, nationality=1, controller="Computer", appearance="0", hidden=False):
+    return PlacedEntity(
+        category=EntityCategory.SOLDIER,
+        x=x,
+        y=y,
+        z=z,
+        source="T-554F60",
+        attributes={
+            "hidden": hidden, "nationality": nationality, "controller": controller, "appearance": appearance,
+        },
+    )
+
+
+def test_minimap_markers_color_soldiers_by_side():
+    """Allied soldiers are green, enemies red, civilians blue; allied dots come last."""
+    doc = MapDocument(title="Markers", version="21", width=20, height=20, origin_x=10, origin_y=5)
+    doc.set_entities([
+        _soldier(12, 7, nationality=1, controller="Human"),          # player squad
+        _soldier(13, 7, nationality=8),                              # French: same side as the squad
+        _soldier(20, 9, nationality=2),                              # German
+        _soldier(21, 9, nationality=16),                             # Italian
+        _soldier(15, 15, nationality=4, appearance="15 (male civilian)"),
+        _soldier(16, 15, nationality=8, appearance="16 (female civilian)"),
+        _soldier(14, 8, nationality=2, hidden=True),                 # not drawn by the game
+        _soldier(2, 2, nationality=2),                               # outside the playable window
+        _soldier(18, 18, z=3, nationality=2),                        # above the visible levels
+        PlacedEntity(category=EntityCategory.TOKEN, x=12, y=12, z=0, source="T-559230"),
+    ])
+
+    markers = get_minimap_markers(doc, active_layer=1)
+    assert [(m.x, m.y, m.color) for m in markers] == [
+        (5, 10, CIVILIAN_COLOR),
+        (6, 10, CIVILIAN_COLOR),
+        (10, 4, ENEMY_COLOR),
+        (11, 4, ENEMY_COLOR),
+        (2, 2, ALLIED_COLOR),
+        (3, 2, ALLIED_COLOR),
+    ]
+
+    # Raising the view level reveals the soldier on level 3; isolating shows only that level
+    assert len(get_minimap_markers(doc, active_layer=6)) == 7
+    isolated = get_minimap_markers(doc, active_layer=6, isolated_layer=3)
+    assert [(m.x, m.y, m.color) for m in isolated] == [(8, 13, ENEMY_COLOR)]
+
+
+def test_minimap_markers_follow_the_player_side():
+    """With a human-controlled German squad, Germans are allied and Americans enemies."""
+    doc = MapDocument(title="Axis", version="21", width=20, height=20)
+    doc.set_entities([
+        _soldier(1, 1, nationality=2, controller="Human"),
+        _soldier(2, 2, nationality=1),
+    ])
+    assert [m.color for m in get_minimap_markers(doc)] == [ENEMY_COLOR, ALLIED_COLOR]
+
+    # No human-controlled soldier: read as an Allied mission
+    doc.set_entities([_soldier(1, 1, nationality=2), _soldier(2, 2, nationality=1)])
+    assert [m.color for m in get_minimap_markers(doc)] == [ENEMY_COLOR, ALLIED_COLOR]

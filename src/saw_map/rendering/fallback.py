@@ -7,7 +7,7 @@ unresolved assets for reverse-engineering inspection.
 from __future__ import annotations
 
 from typing import Tuple
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 from saw_map.maps.model import ComponentType
 
@@ -61,3 +61,78 @@ def create_placeholder_sprite(
     draw.line([(half_w, 0), (half_w, height - 1)], fill=outline_color, width=1)
 
     return img
+
+
+# Width in pixels of the border added by expand_opaque_edges on every side
+EDGE_BLEED = 1
+
+
+def expand_opaque_edges(image: Image.Image) -> Image.Image:
+    """Grows the opaque area of a sprite by one pixel, repeating its edge colors.
+
+    Floor tiles meet exactly edge to edge. Once the view is scaled (zoom or display
+    scaling) rounding leaves hairline gaps between neighbours, which show up as a
+    grid pattern. Letting each floor tile overlap its neighbours by one pixel closes
+    them. The result is EDGE_BLEED pixels larger on every side, so it must be drawn
+    EDGE_BLEED pixels further up and left.
+    """
+    source = image if image.mode == "RGBA" else image.convert("RGBA")
+    width, height = source.size
+    grown = Image.new("RGBA", (width + 2 * EDGE_BLEED, height + 2 * EDGE_BLEED), (0, 0, 0, 0))
+    for dx, dy in ((0, 1), (2, 1), (1, 0), (1, 2), (1, 1)):
+        grown.paste(source, (dx * EDGE_BLEED, dy * EDGE_BLEED), source)
+    return grown
+
+
+# Color of the cell grid painted on floor sprite borders
+GRID_COLOR: Tuple[int, int, int] = (70, 150, 165)
+
+
+def outline_opaque_edges(image: Image.Image, color: Tuple[int, int, int] = GRID_COLOR) -> Image.Image:
+    """Returns a copy of a sprite with the border of its opaque area painted in one color.
+
+    A pixel belongs to the border when it is opaque and one of its four neighbours is
+    transparent or lies outside the image. Painting the border of every floor sprite
+    draws the cell grid on the terrain itself: it follows slopes and raised ground, and
+    sprites drawn in front cover it like any other part of the floor.
+    """
+    source = image if image.mode == "RGBA" else image.convert("RGBA")
+    width, height = source.size
+    alpha = source.getchannel("A").point(lambda value: 255 if value else 0)
+    # A pixel is interior when it and its four neighbours are all opaque: the minimum of
+    # the mask and its four one-pixel shifts. Pixels shifted in from outside count as clear.
+    interior = alpha
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        shifted = Image.new("L", (width, height), 0)
+        shifted.paste(alpha, (dx, dy))
+        interior = ImageChops.darker(interior, shifted)
+    border = ImageChops.subtract(alpha, interior)
+    outlined = source.copy()
+    outlined.paste((*color, 255), (0, 0), border)
+    return outlined
+
+
+# Color of the highlight on the floor sprite of the inspected cell
+HIGHLIGHT_COLOR: Tuple[int, int, int] = (0, 230, 255)
+# Share of the highlight color mixed into the sprite's own colors
+HIGHLIGHT_STRENGTH = 0.3
+
+
+def highlight_opaque_area(
+    image: Image.Image,
+    color: Tuple[int, int, int] = HIGHLIGHT_COLOR,
+    strength: float = HIGHLIGHT_STRENGTH,
+) -> Image.Image:
+    """Returns a copy of a sprite tinted with a color and outlined in that color.
+
+    Used for the floor of the inspected cell: the highlight takes the exact shape of the
+    sprite (slopes included) and is covered by whatever is drawn in front of the floor.
+    Transparent pixels stay transparent.
+    """
+    source = image if image.mode == "RGBA" else image.convert("RGBA")
+    opaque = source.getchannel("A").point(lambda value: 255 if value else 0)
+    tinted = Image.blend(source, Image.new("RGBA", source.size, (*color, 255)), strength)
+    highlighted = source.copy()
+    highlighted.paste(tinted, (0, 0), opaque)
+    return outline_opaque_edges(highlighted, color)
+

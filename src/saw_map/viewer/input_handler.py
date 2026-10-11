@@ -8,7 +8,7 @@ all camera and filter state changes to InputHandler.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Callable, Optional
+from typing import Callable, FrozenSet, Optional, Set
 
 from saw_map.viewer.camera import Camera, ViewPerspective
 
@@ -29,6 +29,7 @@ class InputAction(str, Enum):
     TOGGLE_MINIMAP = "TOGGLE_MINIMAP"
     TOGGLE_SIDEBAR = "TOGGLE_SIDEBAR"
     TOGGLE_METADATA = "TOGGLE_METADATA"
+    TOGGLE_GRID = "TOGGLE_GRID"
     TOGGLE_FLOORS = "TOGGLE_FLOORS"
     TOGGLE_LEFT_WALLS = "TOGGLE_LEFT_WALLS"
     TOGGLE_RIGHT_WALLS = "TOGGLE_RIGHT_WALLS"
@@ -40,8 +41,17 @@ class InputAction(str, Enum):
     EXIT = "EXIT"
 
 
+# Actions that pan continuously while their key is held
+PAN_ACTIONS: FrozenSet[InputAction] = frozenset(
+    {InputAction.PAN_LEFT, InputAction.PAN_RIGHT, InputAction.PAN_UP, InputAction.PAN_DOWN}
+)
+
+
 class InputHandler:
     """Manages viewport action dispatching and camera updates.
+
+    Panning is continuous: backends report pan keys going down and up with
+    set_pan_held() and call update() once per frame with the elapsed time.
 
     Args:
         camera: Camera state mutated by the actions.
@@ -56,6 +66,10 @@ class InputHandler:
 
     ZOOM_IN_FACTOR = 1.25
     ZOOM_OUT_FACTOR = 0.8
+    # Continuous pan speed in window pixels per second (independent of zoom)
+    PAN_SPEED = 900.0
+    # Longest frame time applied to one pan step, so a stalled frame does not jump the view
+    MAX_PAN_FRAME_TIME = 0.1
 
     def __init__(
         self,
@@ -72,6 +86,39 @@ class InputHandler:
         self.on_cycle_palette = on_cycle_palette
         self.on_toggle_fullscreen = on_toggle_fullscreen
         self.on_exit = on_exit
+        self._held_pans: Set[InputAction] = set()
+
+    def set_pan_held(self, action: InputAction, held: bool) -> None:
+        """Records a pan key going down or up; other actions are ignored."""
+        if action not in PAN_ACTIONS:
+            return
+        if held:
+            self._held_pans.add(action)
+        else:
+            self._held_pans.discard(action)
+
+    def release_all_pans(self) -> None:
+        """Stops panning, e.g. when the window loses keyboard focus."""
+        self._held_pans.clear()
+
+    @property
+    def is_panning(self) -> bool:
+        """True while at least one pan key is held."""
+        return bool(self._held_pans)
+
+    def update(self, delta_time: float) -> bool:
+        """Pans the camera for one frame according to the held pan keys.
+
+        Opposite directions cancel. Returns True if the camera moved.
+        """
+        held = self._held_pans
+        dir_x = (InputAction.PAN_LEFT in held) - (InputAction.PAN_RIGHT in held)
+        dir_y = (InputAction.PAN_UP in held) - (InputAction.PAN_DOWN in held)
+        if (dir_x == 0 and dir_y == 0) or delta_time <= 0.0:
+            return False
+        amount = self.PAN_SPEED * min(delta_time, self.MAX_PAN_FRAME_TIME) / self.camera.zoom
+        self.camera.pan(dir_x * amount, dir_y * amount)
+        return True
 
     def _redraw(self) -> None:
         if self.on_redraw_needed:
@@ -144,6 +191,10 @@ class InputHandler:
 
         elif action == InputAction.TOGGLE_METADATA:
             cam.show_metadata = not cam.show_metadata
+
+        elif action == InputAction.TOGGLE_GRID:
+            cam.show_grid = not cam.show_grid
+            self._redraw()
 
         elif action == InputAction.TOGGLE_FLOORS:
             cam.show_floors = not cam.show_floors

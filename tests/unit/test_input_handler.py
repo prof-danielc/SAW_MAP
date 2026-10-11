@@ -147,3 +147,61 @@ def test_map_document_window_contains_and_center():
     assert doc.contains(26, 20) and doc.contains(103, 79)
     assert not doc.contains(25, 20) and not doc.contains(104, 79) and not doc.contains(26, 80)
     assert doc.center == (65.0, 50.0)
+
+
+def test_held_pan_keys_pan_continuously():
+    """Held pan keys move the camera every frame, scaled by elapsed time and zoom."""
+    cam = Camera(zoom=2.0)
+    handler = InputHandler(cam)
+
+    # Nothing held: no movement
+    assert handler.update(0.1) is False and (cam.x, cam.y) == (0.0, 0.0)
+
+    handler.set_pan_held(InputAction.PAN_UP, True)
+    assert handler.is_panning
+    assert handler.update(0.1) is True
+    assert handler.update(0.1) is True
+    # Two frames of 0.1 s at PAN_SPEED window pixels per second, divided by zoom
+    step = InputHandler.PAN_SPEED * 0.1 / 2.0
+    assert (cam.x, cam.y) == (0.0, 2 * step)
+
+    # A second key combines into a diagonal; opposite keys cancel
+    handler.set_pan_held(InputAction.PAN_RIGHT, True)
+    handler.update(0.1)
+    assert (cam.x, cam.y) == (-step, 3 * step)
+    handler.set_pan_held(InputAction.PAN_DOWN, True)
+    handler.update(0.1)
+    assert (cam.x, cam.y) == (-2 * step, 3 * step)
+
+    # Releasing stops the movement
+    handler.release_all_pans()
+    assert handler.is_panning is False
+    assert handler.update(0.1) is False and (cam.x, cam.y) == (-2 * step, 3 * step)
+
+
+def test_pan_update_ignores_other_actions_and_caps_long_frames():
+    """Only pan actions can be held, and a stalled frame does not jump the view."""
+    cam = Camera()
+    handler = InputHandler(cam)
+
+    handler.set_pan_held(InputAction.ZOOM_IN, True)
+    assert handler.is_panning is False
+
+    handler.set_pan_held(InputAction.PAN_LEFT, True)
+    handler.update(5.0)
+    assert cam.x == InputHandler.PAN_SPEED * InputHandler.MAX_PAN_FRAME_TIME
+    handler.set_pan_held(InputAction.PAN_LEFT, False)
+    assert handler.is_panning is False
+
+
+def test_grid_toggle_requests_redraw():
+    """The cell grid is painted on the floor sprites, so toggling it rebuilds them."""
+    cam = Camera()
+    redraws = []
+    handler = InputHandler(cam, on_redraw_needed=lambda: redraws.append(1))
+
+    assert cam.show_grid is False
+    handler.handle_action(InputAction.TOGGLE_GRID)
+    assert cam.show_grid is True
+    handler.handle_action(InputAction.TOGGLE_GRID)
+    assert cam.show_grid is False and len(redraws) == 2

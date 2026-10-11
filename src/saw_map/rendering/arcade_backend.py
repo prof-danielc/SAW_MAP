@@ -19,11 +19,17 @@ from saw_map.geometry.transform import IsometricTransform, TopDownTransform
 from saw_map.maps.model import ComponentType, MapCell, MapDocument, TilesetDefinition
 from saw_map.rendering.backend_base import IRenderer
 from saw_map.rendering.draw_order import DrawOrderStrategy, RenderItem
-from saw_map.rendering.fallback import create_placeholder_sprite
+from saw_map.rendering.fallback import (
+    EDGE_BLEED,
+    create_placeholder_sprite,
+    expand_opaque_edges,
+    highlight_opaque_area,
+    outline_opaque_edges,
+)
 from saw_map.viewer.camera import Camera, ViewPerspective
-from saw_map.viewer.input_handler import InputAction, InputHandler
+from saw_map.viewer.input_handler import PAN_ACTIONS, InputAction, InputHandler
 from saw_map.viewer.inspector import CellInspector
-from saw_map.viewer.minimap import MinimapCalculator, generate_minimap_image
+from saw_map.viewer.minimap import MinimapCalculator, generate_minimap_image, get_minimap_markers
 from saw_map.viewer.overlays import OverlayModel
 
 logger = get_logger("rendering.arcade")
@@ -57,6 +63,7 @@ _KEY_ACTIONS: Dict[int, InputAction] = {
     arcade.key.I: InputAction.TOGGLE_SIDEBAR,
     arcade.key.F1: InputAction.TOGGLE_METADATA,
     arcade.key.H: InputAction.TOGGLE_METADATA,
+    arcade.key.G: InputAction.TOGGLE_GRID,
     arcade.key.KEY_1: InputAction.TOGGLE_FLOORS,
     arcade.key.KEY_2: InputAction.TOGGLE_LEFT_WALLS,
     arcade.key.KEY_3: InputAction.TOGGLE_RIGHT_WALLS,
@@ -129,11 +136,31 @@ class ArcadeWindow(arcade.Window):
         action = _KEY_ACTIONS.get(symbol)
         if action is None:
             return
+        if action in PAN_ACTIONS:
+            self.renderer.input.set_pan_held(action, True)
+            return
         self.renderer.input.handle_action(action)
         if action != InputAction.EXIT:
             self.renderer.update_hover(
                 int(self.mouse_screen_x), int(self.mouse_screen_y), self.width, self.height
             )
+
+    def on_key_release(self, symbol: int, modifiers: int) -> None:
+        """Stops the continuous pan of a released pan key."""
+        action = _KEY_ACTIONS.get(symbol)
+        if action is not None:
+            self.renderer.input.set_pan_held(action, False)
+
+    def on_update(self, delta_time: float) -> None:
+        """Moves the camera every frame while pan keys are held."""
+        if self.renderer.input.update(delta_time):
+            self.renderer.update_hover(
+                int(self.mouse_screen_x), int(self.mouse_screen_y), self.width, self.height
+            )
+
+    def on_deactivate(self) -> None:
+        """Stops panning when the window loses keyboard focus."""
+        self.renderer.input.release_all_pans()
 
 
 class ArcadeRenderer(IRenderer):
@@ -158,6 +185,9 @@ class ArcadeRenderer(IRenderer):
         self.sprite_list = arcade.SpriteList()
         self._texture_cache: Dict[Tuple[str, int, str], Tuple[arcade.Texture, int, int]] = {}
         self.hovered_cell: Optional[Tuple[int, int, int]] = None
+        # Floor sprite of every drawn cell, and the cell whose floor currently shows the highlight
+        self._floor_sprites: Dict[Tuple[int, int, int], Tuple[arcade.Sprite, RenderItem]] = {}
+        self._highlighted_cell: Optional[Tuple[int, int, int]] = None
 
         # Cached Text object for status bar
         self._status_text_obj: Optional[arcade.Text] = None
@@ -246,6 +276,8 @@ class ArcadeRenderer(IRenderer):
             return
 
         self.sprite_list.clear()
+        self._floor_sprites = {}
+        self._highlighted_cell = None
 
         # Select palette
         active_pal = self.palette
@@ -293,14 +325,46 @@ class ArcadeRenderer(IRenderer):
             sprite.center_x = arcade_center_x
             sprite.center_y = arcade_center_y
             self.sprite_list.append(sprite)
+            if item.component_type == ComponentType.FLOOR:
+                self._floor_sprites[(item.grid_x, item.grid_y, item.grid_z)] = (sprite, item)
 
-    def _get_texture_data(self, item: RenderItem, palette: Palette) -> Optional[Tuple[arcade.Texture, int, int]]:
-        """Loads and caches (arcade.Texture, offset_x, offset_y) from Pillow image."""
+        self._apply_highlight()
+
+    def _apply_highlight(self) -> None:
+        """Shows the highlight on the floor sprite of the inspected cell.
+
+        The floor sprite swaps its texture for a tinted, outlined variant of the same size,
+        so the highlight has the shape of the sprite and keeps its place in the draw order.
+        A cell without a drawn floor is left to _draw_selection_box.
+        """
+        target = self.hovered_cell if self.hovered_cell in self._floor_sprites else None
+        if target == self._highlighted_cell or not self.palette:
+            return
+        for cell, highlight in ((self._highlighted_cell, False), (target, True)):
+            if cell is None or cell not in self._floor_sprites:
+                continue
+            sprite, item = self._floor_sprites[cell]
+            tex_data = self._get_texture_data(item, self.palette, highlight=highlight)
+            if tex_data:
+                sprite.texture = tex_data[0]
+        self._highlighted_cell = target
+
+    def _get_texture_data(
+        self, item: RenderItem, palette: Palette, highlight: bool = False
+    ) -> Optional[Tuple[arcade.Texture, int, int]]:
+        """Loads and caches (arcade.Texture, offset_x, offset_y) from Pillow image.
+
+        highlight selects the tinted variant used for the floor of the inspected cell.
+        """
         if not self.asset_loader:
             return None
 
         asset_name = item.asset_name or f"placeholder:{int(item.component_type)}"
-        key = (asset_name.lower(), item.sprite_frame_index, palette.name)
+        # With the cell grid on, floors use a variant with their border painted
+        is_floor = item.component_type == ComponentType.FLOOR
+        with_grid = is_floor and self.camera.show_grid
+        variant = ("#grid" if with_grid else "") + ("#hover" if highlight and is_floor else "")
+        key = (asset_name.lower() + variant, item.sprite_frame_index, palette.name)
 
         if key in self._texture_cache:
             return self._texture_cache[key]
@@ -312,6 +376,17 @@ class ArcadeRenderer(IRenderer):
         else:
             pil_img = create_placeholder_sprite(item.component_type, 128, 64)
             ox, oy = 209, 322
+
+        # Floors overlap their neighbours by one pixel so no seams show between tiles.
+        # The grid border is painted on that overlap, so a shared edge shows a single line.
+        if is_floor:
+            pil_img = expand_opaque_edges(pil_img)
+            ox -= EDGE_BLEED
+            oy -= EDGE_BLEED
+            if with_grid:
+                pil_img = outline_opaque_edges(pil_img)
+            if highlight:
+                pil_img = highlight_opaque_area(pil_img)
 
         try:
             tex = arcade.Texture(image=pil_img)
@@ -349,6 +424,7 @@ class ArcadeRenderer(IRenderer):
         self.hovered_cell = self._inspector.pick_cell_from_world_coords(
             world_sx, world_sy, self.camera, self.map_doc
         )
+        self._apply_highlight()
 
     def draw_viewport(self, win_w: int, win_h: int) -> None:
         """Draws world sprites, selection box, and diagnostic HUD overlays."""
@@ -360,8 +436,13 @@ class ArcadeRenderer(IRenderer):
         self.world_camera.zoom = self.camera.zoom
         self.world_camera.use()
 
-        # 2. Draw world sprites hardware accelerated
-        self.sprite_list.draw()
+        # The inspected cell may have been set directly since the last hover update
+        self._apply_highlight()
+
+        # 2. Draw world sprites hardware accelerated. Nearest-neighbour sampling: with linear
+        # filtering the transparent border of each sprite bleeds into its edge and leaves a visible
+        # seam between adjacent tiles whenever the view is scaled (zoom or display scaling).
+        self.sprite_list.draw(pixelated=True)
 
         # 2b. Draw selection box for currently inspected cell
         self._draw_selection_box()
@@ -416,8 +497,11 @@ class ArcadeRenderer(IRenderer):
             text_item.draw()
 
     def _draw_selection_box(self) -> None:
-        """Renders highlighted selection diamond/square over the currently inspected cell."""
-        if not self.hovered_cell or not self.map_doc:
+        """Renders a selection diamond/square over the inspected cell when it has no drawn floor.
+
+        A cell with a floor is highlighted on the floor sprite itself (_apply_highlight).
+        """
+        if not self.hovered_cell or not self.map_doc or self.hovered_cell == self._highlighted_cell:
             return
 
         hx, hy, hz = self.hovered_cell
@@ -531,8 +615,20 @@ class ArcadeRenderer(IRenderer):
 
         # Draw terrain texture
         rect = arcade.LRBT(gx0, gx0 + disp_w, gy0, gy0 + disp_h)
-        arcade.draw_texture_rect(self._minimap_texture, rect)
+        # pixelated: the minimap texture lives in the same atlas as the map sprites, and a linear
+        # draw here leaves that atlas linear, which blurs the sprites and shows seams between tiles
+        arcade.draw_texture_rect(self._minimap_texture, rect, pixelated=True)
         arcade.draw_lrbt_rectangle_outline(gx0, gx0 + disp_w, gy0, gy0 + disp_h, (80, 90, 100), 1)
+
+        # Soldier dots: allied green, enemy red, civilian blue
+        half = max(1.5, (scale + 1.0) / 2.0)
+        map_h = float(self.map_doc.height)
+        for marker in get_minimap_markers(
+            self.map_doc, self.camera.active_max_layer, self.camera.isolated_layer
+        ):
+            cx = gx0 + (marker.x + 0.5) * scale
+            cy = gy0 + (map_h - (marker.y + 0.5)) * scale
+            arcade.draw_lrbt_rectangle_filled(cx - half, cx + half, cy - half, cy + half, marker.color)
 
         # Viewport polygon (diamond frustum in isometric)
         poly = self._minimap_calc.calculate_viewport_polygon(
@@ -647,6 +743,7 @@ class ArcadeRenderer(IRenderer):
                     ("  [1-4] Toggle Layers", (150, 155, 165), False),
                     ("  [5] Toggle Entities", (150, 155, 165), False),
                     ("  [6] Toggle Editor Markers", (150, 155, 165), False),
+                    ("  [G] Toggle Cell Grid", (150, 155, 165), False),
                     ("  [P] Cycle Palette", (150, 155, 165), False),
                 ]
                 for text_val, col_val, is_b in tips:

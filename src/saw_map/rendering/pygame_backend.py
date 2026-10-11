@@ -6,6 +6,7 @@ as an immediate drop-in replacement if OpenGL hardware initialization fails.
 
 from __future__ import annotations
 
+import math
 import sys
 from typing import Dict, List, Optional, Tuple
 
@@ -19,11 +20,17 @@ from saw_map.geometry.transform import IsometricTransform, TopDownTransform
 from saw_map.maps.model import ComponentType, MapDocument, TilesetDefinition
 from saw_map.rendering.backend_base import IRenderer
 from saw_map.rendering.draw_order import DrawOrderStrategy, RenderItem
-from saw_map.rendering.fallback import create_placeholder_sprite
+from saw_map.rendering.fallback import (
+    EDGE_BLEED,
+    create_placeholder_sprite,
+    expand_opaque_edges,
+    highlight_opaque_area,
+    outline_opaque_edges,
+)
 from saw_map.viewer.camera import Camera, ViewPerspective
-from saw_map.viewer.input_handler import InputAction, InputHandler
+from saw_map.viewer.input_handler import PAN_ACTIONS, InputAction, InputHandler
 from saw_map.viewer.inspector import CellInspector
-from saw_map.viewer.minimap import MinimapCalculator, generate_minimap_image
+from saw_map.viewer.minimap import MinimapCalculator, generate_minimap_image, get_minimap_markers
 from saw_map.viewer.overlays import OverlayModel
 
 logger = get_logger("rendering.pygame")
@@ -57,6 +64,7 @@ _KEY_ACTIONS: Dict[int, InputAction] = {
     pygame.K_i: InputAction.TOGGLE_SIDEBAR,
     pygame.K_F1: InputAction.TOGGLE_METADATA,
     pygame.K_h: InputAction.TOGGLE_METADATA,
+    pygame.K_g: InputAction.TOGGLE_GRID,
     pygame.K_1: InputAction.TOGGLE_FLOORS,
     pygame.K_2: InputAction.TOGGLE_LEFT_WALLS,
     pygame.K_3: InputAction.TOGGLE_RIGHT_WALLS,
@@ -160,13 +168,22 @@ class PygameRenderer(IRenderer):
         self._minimap_surface = None
         self._update_map_center()
 
-    def _get_surface_data(self, item: RenderItem, palette: Palette) -> Optional[Tuple[pygame.Surface, int, int]]:
-        """Loads and caches (pygame.Surface, offset_x, offset_y) from PIL Image."""
+    def _get_surface_data(
+        self, item: RenderItem, palette: Palette, highlight: bool = False
+    ) -> Optional[Tuple[pygame.Surface, int, int]]:
+        """Loads and caches (pygame.Surface, offset_x, offset_y) from PIL Image.
+
+        highlight selects the tinted variant used for the floor of the inspected cell.
+        """
         if not self.asset_loader:
             return None
 
         asset_name = item.asset_name or f"placeholder:{int(item.component_type)}"
-        key = (asset_name.lower(), item.sprite_frame_index, palette.name)
+        # With the cell grid on, floors use a variant with their border painted
+        is_floor = item.component_type == ComponentType.FLOOR
+        with_grid = is_floor and self.camera.show_grid
+        variant = ("#grid" if with_grid else "") + ("#hover" if highlight and is_floor else "")
+        key = (asset_name.lower() + variant, item.sprite_frame_index, palette.name)
 
         if key in self._surface_cache:
             return self._surface_cache[key]
@@ -178,6 +195,17 @@ class PygameRenderer(IRenderer):
         else:
             pil_img = create_placeholder_sprite(item.component_type, 128, 64)
             ox, oy = 209, 322
+
+        # Floors overlap their neighbours by one pixel so no seams show between tiles.
+        # The grid border is painted on that overlap, so a shared edge shows a single line.
+        if is_floor:
+            pil_img = expand_opaque_edges(pil_img)
+            ox -= EDGE_BLEED
+            oy -= EDGE_BLEED
+            if with_grid:
+                pil_img = outline_opaque_edges(pil_img)
+            if highlight:
+                pil_img = highlight_opaque_area(pil_img)
 
         raw_bytes = pil_img.tobytes()
         surf = pygame.image.fromstring(raw_bytes, pil_img.size, "RGBA")
@@ -246,10 +274,18 @@ class PygameRenderer(IRenderer):
         is_iso = self.camera.perspective == ViewPerspective.ISOMETRIC
         zoom = self.camera.zoom
 
+        # The floor of the inspected cell is drawn with a tinted, outlined variant of its sprite,
+        # so the highlight has the sprite's shape and is covered by whatever stands in front
+        floor_highlighted = False
         for item in items:
-            surf_data = self._get_surface_data(item, self.palette)
+            highlight = (
+                item.component_type == ComponentType.FLOOR
+                and (item.grid_x, item.grid_y, item.grid_z) == self.hovered_cell
+            )
+            surf_data = self._get_surface_data(item, self.palette, highlight=highlight)
             if not surf_data:
                 continue
+            floor_highlighted = floor_highlighted or highlight
 
             surf, ox, oy = surf_data
 
@@ -265,27 +301,30 @@ class PygameRenderer(IRenderer):
                 unscaled_x = sx
                 unscaled_y = sy
 
-            # Scale if zoom != 1.0
+            # Screen rectangle: both edges are rounded outwards from the scaled world position,
+            # so neighbouring tiles overlap instead of leaving gaps at fractional zoom
             sw, sh = surf.get_size()
+            draw_x = math.floor(center_x + (unscaled_x * zoom))
+            draw_y = math.floor(center_y + (unscaled_y * zoom))
             if abs(zoom - 1.0) > 0.01:
-                scaled_w = max(1, int(sw * zoom))
-                scaled_h = max(1, int(sh * zoom))
-                draw_surf = pygame.transform.scale(surf, (scaled_w, scaled_h))
+                scaled_w = max(1, math.ceil(center_x + ((unscaled_x + sw) * zoom)) - draw_x)
+                scaled_h = max(1, math.ceil(center_y + ((unscaled_y + sh) * zoom)) - draw_y)
             else:
-                draw_surf = surf
                 scaled_w, scaled_h = sw, sh
-
-            draw_x = int(center_x + (unscaled_x * zoom))
-            draw_y = int(center_y + (unscaled_y * zoom))
 
             # Viewport culling
             if draw_x + scaled_w < 0 or draw_x > self.width or draw_y + scaled_h < 0 or draw_y > self.height:
                 continue
 
+            if (scaled_w, scaled_h) != (sw, sh):
+                draw_surf = pygame.transform.scale(surf, (scaled_w, scaled_h))
+            else:
+                draw_surf = surf
+
             self.screen.blit(draw_surf, (draw_x, draw_y))
 
-        # Selection box for currently inspected cell
-        if self.hovered_cell:
+        # Selection box, only for an inspected cell without a drawn floor
+        if self.hovered_cell and not floor_highlighted:
             self._draw_selection_box()
 
         # Overlays
@@ -300,7 +339,7 @@ class PygameRenderer(IRenderer):
         pygame.display.flip()
 
     def _draw_selection_box(self) -> None:
-        """Renders highlighted selection diamond/square over the currently inspected cell."""
+        """Renders a selection diamond/square over the inspected cell when it has no drawn floor."""
         if not self.hovered_cell or not self.map_doc or not self.screen:
             return
 
@@ -422,6 +461,15 @@ class PygameRenderer(IRenderer):
         self.screen.blit(scaled_terrain, (int(fx), int(fy)))
         pygame.draw.rect(self.screen, (80, 90, 100), (int(fx), int(fy), disp_w, disp_h), 1)
 
+        # Soldier dots: allied green, enemy red, civilian blue
+        dot = max(3, int(round(scale)) + 1)
+        for marker in get_minimap_markers(
+            self.map_doc, self.camera.active_max_layer, self.camera.isolated_layer
+        ):
+            cx = fx + (marker.x + 0.5) * scale
+            cy = fy + (marker.y + 0.5) * scale
+            pygame.draw.rect(self.screen, marker.color, (int(cx - dot / 2.0), int(cy - dot / 2.0), dot, dot))
+
         # Camera viewport indicator polygon (diamond in isometric, rectangle in top-down)
         poly = self._minimap_calc.calculate_viewport_polygon(
             self.map_doc, self.camera, self.width, self.height, fx, fy, disp_w, disp_h, invert_y=False
@@ -515,6 +563,7 @@ class PygameRenderer(IRenderer):
                 "  [1-4] Toggle Layers",
                 "  [5] Toggle Entities",
                 "  [6] Toggle Editor Markers",
+                "  [G] Toggle Cell Grid",
                 "  [P] Cycle Palette",
             ]
             for tip in tips:
@@ -557,6 +606,7 @@ class PygameRenderer(IRenderer):
     def run_loop(self) -> None:
         """Starts Pygame event loop."""
         self.running = True
+        delta_time = 0.0
         while self.running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -591,10 +641,17 @@ class PygameRenderer(IRenderer):
                         self.dragging = False
                 elif event.type == pygame.KEYDOWN:
                     self._handle_keydown(event.key)
+                elif event.type == pygame.KEYUP:
+                    self._handle_keyup(event.key)
+                elif event.type == pygame.WINDOWFOCUSLOST:
+                    self.input.release_all_pans()
 
             if self.running:
+                # Held pan keys move the camera every frame
+                if self.input.update(delta_time):
+                    self.update_hover(*pygame.mouse.get_pos())
                 self.render_frame(self.camera)
-                self.clock.tick(60)
+                delta_time = self.clock.tick(60) / 1000.0
 
         pygame.quit()
 
@@ -603,9 +660,18 @@ class PygameRenderer(IRenderer):
         action = _KEY_ACTIONS.get(key)
         if action is None:
             return
+        if action in PAN_ACTIONS:
+            self.input.set_pan_held(action, True)
+            return
         self.input.handle_action(action)
         if action != InputAction.EXIT:
             self.update_hover(*pygame.mouse.get_pos())
+
+    def _handle_keyup(self, key: int) -> None:
+        """Stops the continuous pan of a released pan key."""
+        action = _KEY_ACTIONS.get(key)
+        if action is not None:
+            self.input.set_pan_held(action, False)
 
     def _stop(self) -> None:
         """Requests termination of the event loop."""
