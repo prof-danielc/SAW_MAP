@@ -34,7 +34,7 @@ class Camera:
     show_metadata: bool = False
     show_grid: bool = False
 
-    MIN_ZOOM: float = 0.25
+    MIN_ZOOM: float = 0.05
     MAX_ZOOM: float = 4.0
 
     def pan(self, dx: float, dy: float) -> None:
